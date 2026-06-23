@@ -1,0 +1,27 @@
+[package]
+name = "powerio-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "WebAssembly surface for powerio: the web WebEngine backend (parse/convert/summary/extract over wasm-bindgen)."
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# cdylib produces the .wasm artifact for the web app; rlib keeps the crate
+# unit-testable on the host. Build for the web with wasm-pack / the wasm32 target;
+# this crate is intentionally NOT in the workspace `default-members`, so a bare
+# `cargo build`/`test`/`clippy` never tries to compile it for the host's libc.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Path deps via the workspace table (carry the 0.3.0 pin). M0 is a stub and does
+# not call into them yet; they are declared so M2 can add convert/parse/extract
+# without touching the manifest. Pure-Rust, verified wasm-safe (plan §4).
+powerio.workspace = true
+powerio-dist.workspace = true
+wasm-bindgen = "0.2"
+
+[lints]
+workspace = true

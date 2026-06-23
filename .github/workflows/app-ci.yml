@@ -1,0 +1,46 @@
+name: app-ci
+
+# Rust lint gate for the crates the PowerIO UI app depends on, including the new
+# powerio-wasm member (also checked on wasm32). The Flutter half of the app's CI
+# lives in the product repo (MohamedNumair/powerio-ui, .github/workflows/ci.yml).
+# Refs MohamedNumair/powerio-ui#7.
+#
+# Toolchain is pinned (not @stable) so a newer clippy can't fail the build on
+# upstream code we didn't change.
+on:
+  push:
+    branches: [powerio-ui-base]
+  pull_request:
+    branches: [powerio-ui-base]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: cargo fmt --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: cargo clippy (host + wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: clippy (host) — app crates
+        run: cargo clippy -p powerio -p powerio-dist -p powerio-capi -p powerio-wasm --all-targets -- -D warnings
+      - name: clippy (wasm32) — powerio-wasm
+        run: cargo clippy -p powerio-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings
