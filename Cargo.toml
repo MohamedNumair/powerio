@@ -1,5 +1,5 @@
 [workspace]
-members = ["powerio", "powerio-matrix", "powerio-cli", "powerio-py", "powerio-capi", "powerio-dist"]
+members = ["powerio", "powerio-matrix", "powerio-cli", "powerio-py", "powerio-capi", "powerio-dist", "powerio-wasm"]
 # Bare `cargo build`/`test`/`clippy` touch only the library + CLI crates, so the
 # toolchain never compiles the PyO3 extension (which needs libpython). Build the
 # binding explicitly with `-p powerio-py`.
