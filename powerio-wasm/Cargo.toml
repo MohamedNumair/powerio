@@ -16,12 +16,20 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Path deps via the workspace table (carry the 0.3.0 pin). M0 is a stub and does
-# not call into them yet; they are declared so M2 can add convert/parse/extract
-# without touching the manifest. Pure-Rust, verified wasm-safe (plan §4).
+# Path deps via the workspace table (carry the 0.3.0 pin). Pure-Rust, verified
+# wasm-safe (plan §4, M2 entry gate #22): neither crate declares features, and
+# their dependency closure is thiserror / num-complex / lexical-core / petgraph
+# / serde(_json) — no arrow, no parquet, no rayon, no getrandom, no
+# powerio-matrix. std::fs is never reached on the in-memory convert/parse path
+# (only DSS Redirect/Compile includes touch it, and those degrade to a warning
+# on wasm rather than failing).
 powerio.workspace = true
 powerio-dist.workspace = true
 wasm-bindgen = "0.2"
+# Derive-based marshalling of the JS DTOs ({text, warnings[]}, summary, tables)
+# so the payloads map 1:1 to the Dart DTOs the desktop FFI backend returns.
+serde = { workspace = true }
+serde-wasm-bindgen = "0.6"
 
 [lints]
 workspace = true
