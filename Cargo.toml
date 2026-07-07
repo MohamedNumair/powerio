@@ -42,6 +42,8 @@ arrow = { version = "59", default-features = false }
 num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Streaming pull parser for the distribution CIM (IEC 61968-13) CIMXML layer.
+quick-xml = "0.41"
 schemars = { version = "1", features = ["derive"] }
 
 [workspace.lints.clippy]

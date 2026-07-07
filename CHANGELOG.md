@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Distribution CIM import: `powerio-dist` reads IEC 61968-13 / GridAPPS-D
+  CIMXML feeders (`parse_cim_file`, the `cim` format name, `.xml` files or
+  directories) into the multiconductor `DistNetwork`, so a CIM feeder converts
+  to OpenDSS, PMD, and BMOPF through the existing machinery. Maps
+  ConnectivityNode buses, per-phase ACLineSegment with PerLengthPhaseImpedance
+  or sequence impedance, EnergyConsumer, LinearShuntCompensator, the switch
+  family, EnergySource, and two-winding PowerTransformer; A/B/C/N phases map to
+  the wire-coordinate terminals 1/2/3/4. Import only (writer is roadmap);
+  TransformerTank / three-winding / wire-geometry forms warn rather than drop.
+  Adds quick-xml to the workspace.
+
 ## 0.6.3
 
 - Arrow matrix axes (#234): the C ABI Arrow export gains a table catalog and

@@ -104,8 +104,20 @@ fn infer_distribution_json_format(text: &str) -> DistTargetFormat {
     }
 }
 
-/// Parses `text` in the named format (see [`dist_target_from_name`]).
+/// Whether a format name selects the read-only distribution CIM reader.
+fn is_cim_name(name: &str) -> bool {
+    matches!(
+        canonical_key(name).as_str(),
+        "cim" | "cimxml" | "cimrdf" | "cdpsm"
+    )
+}
+
+/// Parses `text` in the named format (see [`dist_target_from_name`]); the
+/// read-only `cim` name routes to the distribution CIM reader.
 pub fn parse_str(text: &str, format: &str) -> crate::Result<DistNetwork> {
+    if is_cim_name(format) {
+        return crate::cim::parse_cim_str(text);
+    }
     match format.parse::<DistTargetFormat>()? {
         DistTargetFormat::Dss => Ok(crate::dss::parse_dss_str(text)),
         DistTargetFormat::BmopfJson => crate::bmopf::parse_bmopf_str(text),
@@ -120,6 +132,15 @@ pub fn parse_file(
     from: Option<&str>,
 ) -> crate::Result<DistNetwork> {
     let path = path.as_ref();
+    // Distribution CIM is a directory of profile XMLs or a single .xml file;
+    // dispatch it before the dss/json extension logic.
+    if from.is_some_and(is_cim_name)
+        || (from.is_none()
+            && ((path.is_dir() && crate::cim::dir_has_cim(path))
+                || path.extension().and_then(|e| e.to_str()) == Some("xml")))
+    {
+        return crate::cim::parse_cim_file(path);
+    }
     // Dss goes through the path-based parser (Redirect/Compile resolve
     // against the file's directory); the JSON readers take text.
     let format = if let Some(from) = from {

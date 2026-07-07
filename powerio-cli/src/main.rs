@@ -316,6 +316,9 @@ enum FormatArg {
     /// IEEE BMOPF JSON distribution case (read and write).
     #[value(name = "bmopf-json", alias = "bmopf")]
     BmopfJson,
+    /// Distribution CIM (IEC 61968-13 / GridAPPS-D) CIMXML case (read only).
+    #[value(name = "cim", alias = "cim-xml", alias = "cimxml")]
+    Cim,
 }
 
 impl FormatArg {
@@ -346,7 +349,8 @@ impl FormatArg {
             | FormatArg::Pwb
             | FormatArg::Dss
             | FormatArg::PmdJson
-            | FormatArg::BmopfJson => return None,
+            | FormatArg::BmopfJson
+            | FormatArg::Cim => return None,
         })
     }
 
@@ -374,7 +378,9 @@ impl FormatArg {
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
             | FormatArg::Gridfm
-            | FormatArg::Pwb => None,
+            | FormatArg::Pwb
+            // CIM is a read-only distribution source, not a writable target.
+            | FormatArg::Cim => None,
         }
     }
 
@@ -399,6 +405,7 @@ impl FormatArg {
             FormatArg::Dss => "dss",
             FormatArg::PmdJson => "pmd-json",
             FormatArg::BmopfJson => "bmopf-json",
+            FormatArg::Cim => "cim",
         }
     }
 }
@@ -1299,6 +1306,11 @@ fn run_convert(
             "`convert` cannot write PowerWorld .pwb binary cases; use `--to powerworld` for AUX text"
         );
     }
+    if matches!(to, FormatArg::Cim) {
+        anyhow::bail!(
+            "`convert` cannot write distribution CIM yet (the writer is roadmap);              read CIM with `--from cim` and write dss/pmd-json/bmopf-json"
+        );
+    }
     // goc3-json is read only, but the library still echoes a goc3 source to a
     // goc3 target byte for byte; every other case gets its precise
     // WriteUnsupported error, so no CLI-level bail here.
@@ -1312,7 +1324,9 @@ fn run_convert(
     // input family comes from --from (gridfm reads into the transmission
     // model), from a clear extension, or from the shared JSON classifier.
     let input_is_dist = if let Some(f) = from {
-        Some(f.distribution().is_some())
+        // CIM is a read-only distribution source, so it has no writable
+        // distribution target but still belongs to the distribution family.
+        Some(f == FormatArg::Cim || f.distribution().is_some())
     } else {
         infer_input_family(input)?
     };

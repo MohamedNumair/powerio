@@ -2,7 +2,9 @@
 //! converters between OpenDSS `.dss`, PowerModelsDistribution ENGINEERING
 //! JSON ("PMD JSON"), and the draft JSON schema of the IEEE PES Task Force on
 //! Benchmarking Multiconductor OPF ("BMOPF JSON",
-//! <https://github.com/frederikgeth/bmopf-report>).
+//! <https://github.com/frederikgeth/bmopf-report>). Distribution CIM
+//! (IEC 61968-13 / GridAPPS-D CIMXML) reads in through [`parse_cim_file`], so a
+//! CIM feeder converts to any of the three writable formats.
 //!
 //! The canonical model is a network in wire coordinates: string bus ids,
 //! ordered string terminal names per bus, explicit grounding, terminal maps
@@ -44,6 +46,7 @@
 //! reformats.
 
 pub mod bmopf;
+pub mod cim;
 pub mod convert;
 pub mod diagnostics;
 pub mod dss;
@@ -57,6 +60,7 @@ pub use bmopf::{
     BmopfWriteOptions, parse_bmopf_file, parse_bmopf_str, write_bmopf_json,
     write_bmopf_json_with_options,
 };
+pub use cim::{parse_cim_file, parse_cim_str};
 pub use convert::{
     Conversion, ConversionSidecar, DistTargetFormat, convert_file, convert_str,
     dist_target_from_name, parse_file, parse_str,
