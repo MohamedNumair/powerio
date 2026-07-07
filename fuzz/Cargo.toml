@@ -54,6 +54,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "dgs"
+path = "fuzz_targets/dgs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "pwb"
 path = "fuzz_targets/pwb.rs"
 test = false

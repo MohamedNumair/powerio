@@ -36,6 +36,7 @@ Supported formats:
 - [PSS/E](https://www.siemens.com/global/en/products/energy/grid-software/planning/pss-software/pss-e.html) `.raw` revisions 33, 34, and 35
 - [PowerWorld](https://www.powerworld.com/WebHelp/Content/MainDocumentation_HTML/Case_Formats.htm) `.aux`, plus read only `.pwb` binary cases; `.pwd` display files parse through the separate display API. Behavior and limits are in the [format fidelity guide](https://powerio.dev/guide/format-fidelity.html).
 - GE PSLF `.epc` power flow cases
+- [DIgSILENT PowerFactory](https://www.digsilent.de/en/powerfactory.html) DGS ASCII `.dgs` cases (versions 5, 6, and 7)
 - [PowerModels.jl](https://github.com/lanl-ansi/PowerModels.jl) network data JSON
 - [egret](https://pypi.org/project/gridx-egret/) `ModelData` JSON
 - [pandapower](https://www.pandapower.org/) `pandapowerNet` JSON
@@ -132,6 +133,7 @@ powerio convert tests/data/case14.m --to pandapower-json -o case14.pp.json
 powerio convert tests/data/case14.m --to pypsa-csv -o pypsa_case
 powerio convert pypsa_case --from pypsa-csv --to matpower -o case14.m
 powerio convert case.epc --from pslf --to matpower -o case.m
+powerio convert case.dgs --to matpower -o case.m
 powerio convert case.surge.json --from surge-json --to matpower -o case.m
 powerio convert goc3_case.json --from goc3-json --to matpower -o case.m
 powerio package tests/data/case14.m -o case14.pio.json
@@ -158,6 +160,7 @@ the original file type from converting to a different file type.
 | PowerWorld `.aux` | yes | yes | byte exact retained source | power flow core; PowerWorld only fields are projected or warned |
 | PowerWorld `.pwb` | yes | no | n/a | read only binary case; decoded core converts through every text writer |
 | PSLF `.epc` | yes | yes | byte exact retained source | power flow core; unsupported EPC sections are read warnings |
+| DIgSILENT DGS `.dgs` | yes | yes | retained source echo, byte exact for a UTF-8 source | power flow core across DGS 5/6/7; graphics, variations, and unsupported classes are read warnings |
 | egret JSON | yes | yes | byte exact retained source | ModelData shape checked against egret and PowerModels.jl |
 | pandapower JSON | yes | yes | byte exact retained source | pandapower import validator checks counts and Y_bus |
 | PyPSA CSV folder | yes | yes | directory output, not text echo | PyPSA import validator checks the exported static components |

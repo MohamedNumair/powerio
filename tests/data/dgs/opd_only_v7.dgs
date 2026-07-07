@@ -1,0 +1,15 @@
+************************************************************************
+* Hand-authored operational-data-only DGS fixture (no ElmTerm).
+************************************************************************
+
+$$General;FID(a:40);Descr(a:40);Val(a:40)
+1;Version;7.0
+
+$$ElmCoup;FID(a:40);OP(a:1);on_off(i)
+  ##BRK1;M;1
+  ##BRK2;M;0
+
+$$ElmLod;FID(a:40);OP(a:1);plini(r);qlini(r)
+  ##LOD1;M;5;3
+  ##LOD2;M;2;1
+

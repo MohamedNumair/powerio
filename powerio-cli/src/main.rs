@@ -301,6 +301,9 @@ enum FormatArg {
     /// Surge native JSON network document.
     #[value(name = "surge-json", alias = "surge")]
     SurgeJson,
+    /// DIgSILENT PowerFactory DGS ASCII case (read and write).
+    #[value(name = "dgs", alias = "digsilent", alias = "powerfactory")]
+    Dgs,
     /// Read a gridfm-datakit Parquet dataset directory (read only).
     #[value(name = "gridfm")]
     Gridfm,
@@ -337,6 +340,7 @@ impl FormatArg {
             FormatArg::Pslf => TargetFormat::Pslf,
             FormatArg::Goc3Json => TargetFormat::Goc3Json,
             FormatArg::SurgeJson => TargetFormat::SurgeJson,
+            FormatArg::Dgs => TargetFormat::Dgs,
             // PypsaCsv is a transmission format, but it writes a directory, not a
             // text target; `run_convert` handles it before reaching here. gridfm
             // is read only here, and Pwb is read only. The distribution formats
@@ -373,6 +377,7 @@ impl FormatArg {
             | FormatArg::Pslf
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
+            | FormatArg::Dgs
             | FormatArg::Gridfm
             | FormatArg::Pwb => None,
         }
@@ -394,6 +399,7 @@ impl FormatArg {
             FormatArg::Pslf => "pslf",
             FormatArg::Goc3Json => "goc3-json",
             FormatArg::SurgeJson => "surge-json",
+            FormatArg::Dgs => "dgs",
             FormatArg::Gridfm => "gridfm",
             FormatArg::Pwb => "pwb",
             FormatArg::Dss => "dss",
@@ -1246,7 +1252,7 @@ fn infer_input_family(input: &Path) -> anyhow::Result<Option<bool>> {
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase);
     match ext.as_deref() {
-        Some("m" | "raw" | "aux" | "epc" | "pwb") => return Ok(Some(false)),
+        Some("m" | "raw" | "aux" | "epc" | "pwb" | "dgs") => return Ok(Some(false)),
         Some("dss") => return Ok(Some(true)),
         Some("json") => {}
         _ => return Ok(None),

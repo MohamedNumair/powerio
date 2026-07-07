@@ -1,0 +1,85 @@
+********************************************************************************
+*
+* Hand-authored DGS fixture for the powerio test suite.
+* Original to this repository; not derived from any vendor example.
+*
+********************************************************************************
+
+$$General;ID(a:40);Descr(a:40);Val(a:40)
+1;Version;5.0
+
+$$ElmNet;ID(a:40);loc_name(a);fold_id(p);frnom(r)
+1;Grid;;50
+
+$$ElmTerm;ID(a:40);loc_name(a);fold_id(p);typ_id(p);chr_name(a);iUsage(i);outserv(i);phtech(i);uknom(r)
+2;HV1;1;;;0;0;0;110
+3;HV2;1;;;0;0;0;110
+4;MV1;1;;;0;0;0;20
+5;MV2;1;;;0;0;0;20
+6;MV3;1;;;0;0;0;20
+
+$$ElmXnet;ID(a:40);loc_name(a);fold_id(p);chr_name(a);bustp(a);pgini(r);qgini(r);usetp(r);snss(r)
+7;Grid Supply;1;;SL;0;0;1.02;2000
+
+$$ElmSym;ID(a:40);loc_name(a);fold_id(p);typ_id(p);chr_name(a);i_mot(i);iv_mode(i);ngnum(i);outserv(i);pgini(r);q_max(r);q_min(r);qgini(r);usetp(r)
+8;G1;1;9;;0;1;1;0;15;1;-1;5;1.01
+
+$$TypSym;ID(a:40);loc_name(a);fold_id(p);cosn(r);rstr(r);satur(i);sgn(r);ugn(r);xd(r)
+9;Gen Type;;0.9;0;0;25;10.5;2
+
+$$ElmShnt;ID(a:40);loc_name(a);fold_id(p);chr_name(a);shtype(i);ncapa(i);ncapx(i);iswitch(i);outserv(i);qtotn(r);ushnm(r)
+10;Sh1;1;;2;1;1;0;0;5;110
+
+$$ElmLod;ID(a:40);loc_name(a);fold_id(p);typ_id(p);chr_name(a);outserv(i);plini(r);qlini(r);scale0(r)
+11;Load1;1;;$empty$;0;2;1;1
+12;"Load;2";1;;;0;3;1.5;1
+
+$$ElmLne;ID(a:40);loc_name(a);fold_id(p);typ_id(p);chr_name(a);dline(r);fline(r);outserv(i)
+13;L1;1;17;;10;1;0
+14;L2;1;18;;5;1;0
+
+$$ElmLnesec;ID(a:40);loc_name(a);fold_id(p);typ_id(p);chr_name(a);dline(r);fline(r);index(r)
+15;Sec1;13;17;;4;1;1
+16;Sec2;13;17;;6;1;2
+
+$$TypLne;ID(a:40);loc_name(a);fold_id(p);chr_name(a);cline(r);nlnph(i);rline(r);sline(r);uline(r);xline(r)
+17;Line Type 1;;;0.01;3;0.1;0.5;110;0.4
+18;Line Type 2;;;0.02;3;0.2;0.3;20;0.3
+
+$$ElmTr2;ID(a:40);loc_name(a);fold_id(p);typ_id(p);chr_name(a);nntap(i);outserv(i);ratfac(r)
+19;TR;1;20;;1;0;1
+
+$$TypTr2;ID(a:40);loc_name(a);fold_id(p);curmg(r);dutap(r);nntap0(i);nt2ag(r);pcutr(r);pfe(r);phitr(r);strn(r);tap_side(i);uktr(r);utrn_h(r);utrn_l(r)
+20;Trafo Type;;0.5;2.5;0;0;100;10;0;40;0;12;110;20
+
+$$ElmCoup;ID(a:40);loc_name(a);fold_id(p);chr_name(a);aUsage(a);on_off(i)
+21;C1;1;;cbk;1
+22;C2;1;;cbk;0
+
+$$StaCubic;ID(a:40);loc_name(a);fold_id(p);chr_name(a);obj_bus(i);obj_id(p)
+23;Cub;2;;0;7
+24;Cub;3;;0;8
+25;Cub;3;;0;10
+26;Cub;4;;0;11
+27;Cub;5;;0;12
+28;Cub;2;;0;13
+29;Cub;3;;1;13
+30;Cub;4;;0;14
+31;Cub;5;;1;14
+32;Cub;3;;0;19
+33;Cub;4;;1;19
+34;Cub;5;;0;21
+35;Cub;6;;1;21
+36;Cub;4;;0;22
+37;Cub;6;;1;22
+
+$$StaSwitch;ID(a:40);loc_name(a);fold_id(p);typ_id(p);iUse(i);on_off(i)
+38;Switch;34;;1;1
+39;Switch;35;;1;1
+40;Switch;31;;1;0
+
+$$IntGrfcon;ID(a:40);loc_name(a);fold_id(p);rX:SIZEROW(i);rX:0(r);rX:1(r);rY:SIZEROW(i);rY:0(r);rY:1(r)
+41;gc;1;2;1.5;2.5;2;3.5;4.5
+
+$$ElmFoobar;ID(a:40);loc_name(a);fold_id(p);someattr(r)
+42;fb;1;42

@@ -233,6 +233,12 @@ pub enum SourceFormat {
     Goc3Json,
     /// Read from a Surge native JSON document.
     SurgeJson,
+    /// Read from a DIgSILENT PowerFactory DGS ASCII case (`.dgs`, versions
+    /// 5/6/7). The reader retains the decoded source text, so a same-format write
+    /// echoes it (byte-for-byte for a UTF-8 source; decoded-normalized for a
+    /// Latin-1 or UTF-16 source); a cross-format or source-dropped write goes
+    /// through the DGS 7.0 serializer ([`write_dgs`](crate::write_dgs)).
+    Dgs,
 }
 
 impl SourceFormat {
@@ -257,6 +263,7 @@ impl SourceFormat {
             SourceFormat::PypsaCsv => "pypsa-csv",
             SourceFormat::Goc3Json => "goc3-json",
             SourceFormat::SurgeJson => "surge-json",
+            SourceFormat::Dgs => "dgs",
         }
     }
 }

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- DIgSILENT PowerFactory DGS (#150): the ASCII DGS export now reads at versions
+  5.0, 6.0, and 7.0 and writes DGS 7.0 through the neutral `Network` hub. The
+  reader resolves `StaCubic` cubicle topology, fuses closed `ElmCoup` couplers,
+  and maps lines, two- and three-winding transformers, machines, the external
+  grid, loads, and shunts onto a synthesized 100 MVA base with the frequency
+  from `ElmNet.frnom`; graphics, variations, and unsupported classes surface as
+  read warnings, and encrypted `.pfd` project exports are rejected with a pointer
+  to the ASCII export path. Registered across the CLI (`--to dgs`, aliases
+  `digsilent`/`powerfactory`), Python, and C ABI format surfaces, with no ABI or
+  version bump.
+
 ## 0.6.3
 
 - Arrow matrix axes (#234): the C ABI Arrow export gains a table catalog and

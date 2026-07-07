@@ -377,7 +377,7 @@ fn looks_like_distribution_input(input: &Path) -> PyResult<bool> {
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase);
     match ext.as_deref() {
-        Some("m" | "raw" | "aux" | "epc" | "pwb") => return Ok(false),
+        Some("m" | "raw" | "aux" | "epc" | "pwb" | "dgs") => return Ok(false),
         Some("dss") => return Ok(true),
         Some("json") => {}
         _ => return Ok(false),
@@ -1143,7 +1143,8 @@ fn parse_file(path: &str, from_: Option<&str>) -> PyResult<PyNetwork> {
 
 /// Parse a case from in-memory text in the named `format` (`matpower`,
 /// `powermodels-json`, `egret-json`, `pandapower-json`, `psse`, `powerworld`,
-/// `pslf`, `goc3-json`, `surge-json`; aliases `m`/`pm`/`egret`/`pp`/`raw`/`aux`/`epc`/`goc3`/`surge`).
+/// `pslf`, `goc3-json`, `surge-json`, `dgs`; aliases
+/// `m`/`pm`/`egret`/`pp`/`raw`/`aux`/`epc`/`goc3`/`surge`/`digsilent`).
 #[pyfunction]
 #[pyo3(signature = (text, format=None))]
 fn parse_str(text: &str, format: Option<&str>) -> PyResult<PyNetwork> {

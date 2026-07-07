@@ -1,0 +1,85 @@
+********************************************************************************
+*
+* Hand-authored DGS fixture for the powerio test suite.
+* Original to this repository; not derived from any vendor example.
+*
+********************************************************************************
+
+$$General;FID(a:40);Descr(a:40);Val(a:40)
+1;Version;7.0
+
+$$ElmNet;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);frnom(r)
+Grid;C;Grid;;50
+
+$$ElmTerm;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);chr_name(a:20);iUsage(i);outserv(i);phtech(i);uknom(r)
+HV1;C;HV1;Grid;;;0;0;0;110
+HV2;C;HV2;Grid;;;0;0;0;110
+MV1;C;MV1;Grid;;;0;0;0;20
+MV2;C;MV2;Grid;;;0;0;0;20
+MV3;C;MV3;Grid;;;0;0;0;20
+
+$$ElmXnet;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);chr_name(a:20);bustp(a:2);pgini(r);qgini(r);usetp(r);snss(r)
+Grid Supply;C;Grid Supply;Grid;;SL;0;0;1.02;2000
+
+$$ElmSym;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);chr_name(a:20);i_mot(i);iv_mode(i);ngnum(i);outserv(i);pgini(r);q_max(r);q_min(r);qgini(r);usetp(r)
+G1;C;G1;Grid;SYMTYPE1;;0;1;1;0;15;1;-1;5;1.01
+
+$$TypSym;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);cosn(r);rstr(r);satur(i);sgn(r);ugn(r);xd(r)
+SYMTYPE1;C;Gen Type;;0.9;0;0;25;10.5;2
+
+$$ElmShnt;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);chr_name(a:20);shtype(i);ncapa(i);ncapx(i);iswitch(i);outserv(i);qtotn(r);ushnm(r)
+Sh1;C;Sh1;Grid;;2;1;1;0;0;5;110
+
+$$ElmLod;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);chr_name(a:20);outserv(i);plini(r);qlini(r);scale0(r)
+Load1;C;Load1;Grid;;$empty$;0;2;1;1
+Load2;C;"Load;2";Grid;;;0;3;1.5;1
+
+$$ElmLne;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);chr_name(a:20);dline(r);fline(r);outserv(i)
+L1;C;L1;Grid;LNETYPE1;;10;1;0
+L2;C;L2;Grid;LNETYPE2;;5;1;0
+
+$$ElmLnesec;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);chr_name(a:20);dline(r);fline(r);index(r)
+L1S1;C;Sec1;L1;LNETYPE1;;4;1;1
+L1S2;C;Sec2;L1;LNETYPE1;;6;1;2
+
+$$TypLne;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);chr_name(a:20);cline(r);nlnph(i);rline(r);sline(r);uline(r);xline(r)
+LNETYPE1;C;Line Type 1;;;0.01;3;0.1;0.5;110;0.4
+LNETYPE2;C;Line Type 2;;;0.02;3;0.2;0.3;20;0.3
+
+$$ElmTr2;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);chr_name(a:20);nntap(i);outserv(i);ratfac(r)
+TR;C;TR;Grid;TR2TYPE1;;1;0;1
+
+$$TypTr2;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);curmg(r);dutap(r);nntap0(i);nt2ag(r);pcutr(r);pfe(r);phitr(r);strn(r);tap_side(i);uktr(r);utrn_h(r);utrn_l(r)
+TR2TYPE1;C;Trafo Type;;0.5;2.5;0;0;100;10;0;40;0;12;110;20
+
+$$ElmCoup;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);chr_name(a:20);aUsage(a:2);on_off(i)
+C1;C;C1;Grid;;cbk;1
+C2;C;C2;Grid;;cbk;0
+
+$$StaCubic;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);chr_name(a:20);obj_bus(i);obj_id(p)
+CUB1;C;Cub;HV1;;0;Grid Supply
+CUB2;C;Cub;HV2;;0;G1
+CUB3;C;Cub;HV2;;0;Sh1
+CUB4;C;Cub;MV1;;0;Load1
+CUB5;C;Cub;MV2;;0;Load2
+CUB6;C;Cub;HV1;;0;L1
+CUB7;C;Cub;HV2;;1;L1
+CUB8;C;Cub;MV1;;0;L2
+CUB9;C;Cub;MV2;;1;L2
+CUB10;C;Cub;HV2;;0;TR
+CUB11;C;Cub;MV1;;1;TR
+CUB12;C;Cub;MV2;;0;C1
+CUB13;C;Cub;MV3;;1;C1
+CUB14;C;Cub;MV1;;0;C2
+CUB15;C;Cub;MV3;;1;C2
+
+$$StaSwitch;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);iUse(i);on_off(i)
+SW1;C;Switch;CUB12;;1;1
+SW2;C;Switch;CUB13;;1;1
+SW3;C;Switch;CUB9;;1;0
+
+$$IntGrfcon;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);rX:SIZEROW(i);rX:0(r);rX:1(r);rY:SIZEROW(i);rY:0(r);rY:1(r)
+GC1;C;gc;Grid;2;1.5;2.5;2;3.5;4.5
+
+$$ElmFoobar;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);someattr(r)
+FB1;C;fb;Grid;42

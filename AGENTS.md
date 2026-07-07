@@ -30,11 +30,12 @@ graph views for any downstream solver. Feeds the GridFM ML pipeline.
 `IndexedNetwork` is the dense indexed analysis view derived from it.
 
 Formats. MATPOWER `.m`, PowerModels JSON, PSS/E `.raw` (v33/34/35),
-PowerWorld `.aux`, PSLF `.epc`, egret JSON, pandapower JSON, PyPSA CSV folders,
-Surge JSON, and PowerIO JSON all read and write. GO Challenge 3 JSON is a read
-only input with byte exact same source echo; PowerWorld `.pwb` is a read only
-binary input with no writer. PowerWorld `.pwd` display files use the display
-API. GridFM Parquet datasets read and write through directory helpers.
+PowerWorld `.aux`, PSLF `.epc`, DIgSILENT DGS `.dgs` (v5/6/7 read, v7 write),
+egret JSON, pandapower JSON, PyPSA CSV folders, Surge JSON, and PowerIO JSON all
+read and write. GO Challenge 3 JSON is a read only input with byte exact same
+source echo; PowerWorld `.pwb` is a read only binary input with no writer.
+PowerWorld `.pwd` display files use the display API. GridFM Parquet datasets
+read and write through directory helpers.
 Every balanced case format meets at `Network`, so a new format is one
 reader/writer at the hub, not a pairwise converter.
 
@@ -147,6 +148,7 @@ powerio/                      # parser + Network hub + converters
 │   ├── pandapower.rs        # pandapower JSON reader + writer
 │   ├── pypsa.rs             # PyPSA CSV folder reader + writer
 │   ├── pslf.rs              # PSLF EPC reader + writer
+│   ├── dgs.rs               # DIgSILENT PowerFactory DGS ASCII reader + writer
 │   ├── psse.rs              # PSS/E .raw reader + writer
 │   ├── powerworld.rs        # PowerWorld .aux reader + writer
 │   └── egret.rs             # egret JSON reader + writer
