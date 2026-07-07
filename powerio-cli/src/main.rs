@@ -307,6 +307,9 @@ enum FormatArg {
     /// Read a PowerWorld .pwb binary case (read only).
     #[value(name = "pwb")]
     Pwb,
+    /// Read a CGMES (IEC 61970-600) CIMXML file set directory (read only).
+    #[value(name = "cgmes", alias = "cim-xml")]
+    Cgmes,
     /// OpenDSS `.dss` distribution case (read and write).
     #[value(name = "dss", alias = "opendss")]
     Dss,
@@ -344,6 +347,7 @@ impl FormatArg {
             FormatArg::PypsaCsv
             | FormatArg::Gridfm
             | FormatArg::Pwb
+            | FormatArg::Cgmes
             | FormatArg::Dss
             | FormatArg::PmdJson
             | FormatArg::BmopfJson => return None,
@@ -374,7 +378,8 @@ impl FormatArg {
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
             | FormatArg::Gridfm
-            | FormatArg::Pwb => None,
+            | FormatArg::Pwb
+            | FormatArg::Cgmes => None,
         }
     }
 
@@ -395,6 +400,7 @@ impl FormatArg {
             FormatArg::Goc3Json => "goc3-json",
             FormatArg::SurgeJson => "surge-json",
             FormatArg::Gridfm => "gridfm",
+            FormatArg::Cgmes => "cgmes",
             FormatArg::Pwb => "pwb",
             FormatArg::Dss => "dss",
             FormatArg::PmdJson => "pmd-json",

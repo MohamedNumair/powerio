@@ -233,6 +233,10 @@ pub enum SourceFormat {
     Goc3Json,
     /// Read from a Surge native JSON document.
     SurgeJson,
+    /// Read from a CGMES (IEC 61970-600) CIMXML file set: 2.4.15 or 3.0,
+    /// bus-branch through the TP profile. Read only, no retained source text
+    /// (a multi-file set has no single byte-exact echo).
+    Cgmes,
 }
 
 impl SourceFormat {
@@ -257,6 +261,7 @@ impl SourceFormat {
             SourceFormat::PypsaCsv => "pypsa-csv",
             SourceFormat::Goc3Json => "goc3-json",
             SourceFormat::SurgeJson => "surge-json",
+            SourceFormat::Cgmes => "cgmes",
         }
     }
 }

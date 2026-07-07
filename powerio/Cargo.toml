@@ -31,6 +31,8 @@ petgraph = "0.8"
 serde.workspace = true
 # Format converters (PowerModels / egret JSON) serialize the typed model.
 serde_json.workspace = true
+# CGMES CIMXML (IEC 61970-552) streaming reader; namespace-aware via NsReader.
+quick-xml.workspace = true
 schemars = { workspace = true, optional = true }
 
 [dev-dependencies]

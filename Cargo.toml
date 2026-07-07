@@ -43,6 +43,9 @@ num-complex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = { version = "1", features = ["derive"] }
+# Streaming pull parser for the CGMES CIMXML layer; default features are empty,
+# so this pulls in no encoding/serde machinery.
+quick-xml = "0.41"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }

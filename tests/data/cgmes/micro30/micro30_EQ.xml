@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:cim="http://iec.ch/TC57/CIM100#"
+         xmlns:eu="http://iec.ch/TC57/CIM100-European#"
+         xmlns:md="http://iec.ch/TC57/61970-552/ModelDescription/1#">
+  <md:FullModel rdf:about="urn:uuid:10000000-0000-4000-8000-000000000001">
+    <md:Model.scenarioTime>2026-01-01T00:00:00Z</md:Model.scenarioTime>
+    <md:Model.created>2026-01-01T00:00:00Z</md:Model.created>
+    <md:Model.description>powerio micro30</md:Model.description>
+    <md:Model.version>1</md:Model.version>
+    <md:Model.profile>http://iec.ch/TC57/ns/CIM/CoreEquipment-EU/3.0</md:Model.profile>
+    <md:Model.modelingAuthoritySet>http://powerio.example/micro30</md:Model.modelingAuthoritySet>
+  </md:FullModel>
+  <cim:BaseVoltage rdf:ID="_bv110">
+    <cim:IdentifiedObject.mRID>bv110</cim:IdentifiedObject.mRID>
+    <cim:IdentifiedObject.name>110 kV</cim:IdentifiedObject.name>
+    <cim:BaseVoltage.nominalVoltage>110</cim:BaseVoltage.nominalVoltage>
+  </cim:BaseVoltage>
+  <cim:BaseVoltage rdf:ID="_bv20">
+    <cim:IdentifiedObject.name>20 kV</cim:IdentifiedObject.name>
+    <cim:BaseVoltage.nominalVoltage>20</cim:BaseVoltage.nominalVoltage>
+  </cim:BaseVoltage>
+  <cim:BaseFrequency rdf:ID="_freq">
+    <cim:IdentifiedObject.name>50 Hz</cim:IdentifiedObject.name>
+    <cim:BaseFrequency.frequency>50</cim:BaseFrequency.frequency>
+  </cim:BaseFrequency>
+  <cim:ACLineSegment rdf:ID="_line1">
+    <cim:IdentifiedObject.name>L1</cim:IdentifiedObject.name>
+    <cim:ACLineSegment.r>2.42</cim:ACLineSegment.r>
+    <cim:ACLineSegment.x>12.1</cim:ACLineSegment.x>
+    <cim:ACLineSegment.bch>3e-6</cim:ACLineSegment.bch>
+    <cim:Conductor.length>10</cim:Conductor.length>
+  </cim:ACLineSegment>
+  <cim:Terminal rdf:ID="_t_l1_1">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_line1"/>
+    <cim:ACDCTerminal.sequenceNumber>1</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:Terminal rdf:ID="_t_l1_2">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_line1"/>
+    <cim:ACDCTerminal.sequenceNumber>2</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:PowerTransformer rdf:ID="_tr1">
+    <cim:IdentifiedObject.name>TR1</cim:IdentifiedObject.name>
+  </cim:PowerTransformer>
+  <cim:PowerTransformerEnd rdf:ID="_tr1_end1">
+    <cim:IdentifiedObject.name>TR1 end1</cim:IdentifiedObject.name>
+    <cim:PowerTransformerEnd.PowerTransformer rdf:resource="#_tr1"/>
+    <cim:TransformerEnd.endNumber>1</cim:TransformerEnd.endNumber>
+    <cim:TransformerEnd.Terminal rdf:resource="#_t_tr1_1"/>
+    <cim:PowerTransformerEnd.ratedU>110</cim:PowerTransformerEnd.ratedU>
+    <cim:PowerTransformerEnd.ratedS>40</cim:PowerTransformerEnd.ratedS>
+    <cim:PowerTransformerEnd.r>0.6</cim:PowerTransformerEnd.r>
+    <cim:PowerTransformerEnd.x>10</cim:PowerTransformerEnd.x>
+    <cim:PowerTransformerEnd.b>0</cim:PowerTransformerEnd.b>
+  </cim:PowerTransformerEnd>
+  <cim:PowerTransformerEnd rdf:ID="_tr1_end2">
+    <cim:IdentifiedObject.name>TR1 end2</cim:IdentifiedObject.name>
+    <cim:PowerTransformerEnd.PowerTransformer rdf:resource="#_tr1"/>
+    <cim:TransformerEnd.endNumber>2</cim:TransformerEnd.endNumber>
+    <cim:TransformerEnd.Terminal rdf:resource="#_t_tr1_2"/>
+    <cim:PowerTransformerEnd.ratedU>21</cim:PowerTransformerEnd.ratedU>
+    <cim:PowerTransformerEnd.r>0</cim:PowerTransformerEnd.r>
+    <cim:PowerTransformerEnd.x>0</cim:PowerTransformerEnd.x>
+    <cim:TransformerEnd.RatioTapChanger rdf:resource="#_rtc1"/>
+  </cim:PowerTransformerEnd>
+  <cim:Terminal rdf:ID="_t_tr1_1">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_tr1"/>
+    <cim:ACDCTerminal.sequenceNumber>1</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:Terminal rdf:ID="_t_tr1_2">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_tr1"/>
+    <cim:ACDCTerminal.sequenceNumber>2</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:RatioTapChanger rdf:ID="_rtc1">
+    <cim:IdentifiedObject.name>TR1 tap</cim:IdentifiedObject.name>
+    <cim:RatioTapChanger.TransformerEnd rdf:resource="#_tr1_end2"/>
+    <cim:TapChanger.lowStep>1</cim:TapChanger.lowStep>
+    <cim:TapChanger.highStep>25</cim:TapChanger.highStep>
+    <cim:TapChanger.neutralStep>13</cim:TapChanger.neutralStep>
+    <cim:TapChanger.normalStep>13</cim:TapChanger.normalStep>
+    <cim:TapChanger.neutralU>21</cim:TapChanger.neutralU>
+    <cim:TapChanger.ltcFlag>true</cim:TapChanger.ltcFlag>
+    <cim:RatioTapChanger.stepVoltageIncrement>1.25</cim:RatioTapChanger.stepVoltageIncrement>
+  </cim:RatioTapChanger>
+  <cim:EnergyConsumer rdf:ID="_load1">
+    <cim:IdentifiedObject.name>LOAD1</cim:IdentifiedObject.name>
+  </cim:EnergyConsumer>
+  <cim:Terminal rdf:ID="_t_load1">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_load1"/>
+    <cim:ACDCTerminal.sequenceNumber>1</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:SynchronousMachine rdf:ID="_gen1">
+    <cim:IdentifiedObject.name>GEN1</cim:IdentifiedObject.name>
+    <cim:RotatingMachine.ratedS>50</cim:RotatingMachine.ratedS>
+    <cim:SynchronousMachine.maxQ>25</cim:SynchronousMachine.maxQ>
+    <cim:SynchronousMachine.minQ>-20</cim:SynchronousMachine.minQ>
+    <cim:RotatingMachine.GeneratingUnit rdf:resource="#_gu1"/>
+    <cim:RegulatingCondEq.RegulatingControl rdf:resource="#_rc1"/>
+  </cim:SynchronousMachine>
+  <cim:GeneratingUnit rdf:ID="_gu1">
+    <cim:IdentifiedObject.name>GEN1 unit</cim:IdentifiedObject.name>
+    <cim:GeneratingUnit.minOperatingP>0</cim:GeneratingUnit.minOperatingP>
+    <cim:GeneratingUnit.maxOperatingP>80</cim:GeneratingUnit.maxOperatingP>
+  </cim:GeneratingUnit>
+  <cim:Terminal rdf:ID="_t_gen1">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_gen1"/>
+    <cim:ACDCTerminal.sequenceNumber>1</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:RegulatingControl rdf:ID="_rc1">
+    <cim:IdentifiedObject.name>GEN1 avr</cim:IdentifiedObject.name>
+    <cim:RegulatingControl.mode rdf:resource="http://iec.ch/TC57/CIM100#RegulatingControlModeKind.voltage"/>
+    <cim:RegulatingControl.Terminal rdf:resource="#_t_gen1"/>
+  </cim:RegulatingControl>
+  <cim:LinearShuntCompensator rdf:ID="_sh1">
+    <cim:IdentifiedObject.name>SH1</cim:IdentifiedObject.name>
+    <cim:LinearShuntCompensator.bPerSection>0.0012</cim:LinearShuntCompensator.bPerSection>
+    <cim:LinearShuntCompensator.gPerSection>0</cim:LinearShuntCompensator.gPerSection>
+    <cim:ShuntCompensator.maximumSections>2</cim:ShuntCompensator.maximumSections>
+    <cim:ShuntCompensator.normalSections>1</cim:ShuntCompensator.normalSections>
+    <cim:ShuntCompensator.nomU>20</cim:ShuntCompensator.nomU>
+  </cim:LinearShuntCompensator>
+  <cim:Terminal rdf:ID="_t_sh1">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_sh1"/>
+    <cim:ACDCTerminal.sequenceNumber>1</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:Breaker rdf:ID="_brk1">
+    <cim:IdentifiedObject.name>BRK1</cim:IdentifiedObject.name>
+    <cim:Switch.normalOpen>false</cim:Switch.normalOpen>
+    <cim:Switch.ratedCurrent>3000</cim:Switch.ratedCurrent>
+  </cim:Breaker>
+  <cim:Terminal rdf:ID="_t_brk1_1">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_brk1"/>
+    <cim:ACDCTerminal.sequenceNumber>1</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:Terminal rdf:ID="_t_brk1_2">
+    <cim:Terminal.ConductingEquipment rdf:resource="#_brk1"/>
+    <cim:ACDCTerminal.sequenceNumber>2</cim:ACDCTerminal.sequenceNumber>
+  </cim:Terminal>
+  <cim:OperationalLimitSet rdf:ID="_ols1">
+    <cim:IdentifiedObject.name>L1 limits</cim:IdentifiedObject.name>
+    <cim:OperationalLimitSet.Terminal rdf:resource="#_t_l1_1"/>
+  </cim:OperationalLimitSet>
+  <cim:OperationalLimitType rdf:ID="_olt_patl">
+    <cim:IdentifiedObject.name>patl</cim:IdentifiedObject.name>
+    <cim:OperationalLimitType.direction rdf:resource="http://iec.ch/TC57/CIM100#OperationalLimitDirectionKind.absoluteValue"/>
+    <cim:OperationalLimitType.isInfiniteDuration>true</cim:OperationalLimitType.isInfiniteDuration>
+    <eu:OperationalLimitType.kind rdf:resource="http://iec.ch/TC57/CIM100-European#LimitKind.patl"/>
+  </cim:OperationalLimitType>
+  <cim:OperationalLimitType rdf:ID="_olt_tatl">
+    <cim:IdentifiedObject.name>tatl</cim:IdentifiedObject.name>
+    <cim:OperationalLimitType.direction rdf:resource="http://iec.ch/TC57/CIM100#OperationalLimitDirectionKind.absoluteValue"/>
+    <cim:OperationalLimitType.isInfiniteDuration>false</cim:OperationalLimitType.isInfiniteDuration>
+    <cim:OperationalLimitType.acceptableDuration>900</cim:OperationalLimitType.acceptableDuration>
+    <eu:OperationalLimitType.kind rdf:resource="http://iec.ch/TC57/CIM100-European#LimitKind.tatl"/>
+  </cim:OperationalLimitType>
+  <cim:CurrentLimit rdf:ID="_cl_patl">
+    <cim:IdentifiedObject.name>L1 patl</cim:IdentifiedObject.name>
+    <cim:OperationalLimit.OperationalLimitSet rdf:resource="#_ols1"/>
+    <cim:OperationalLimit.OperationalLimitType rdf:resource="#_olt_patl"/>
+    <cim:CurrentLimit.normalValue>400</cim:CurrentLimit.normalValue>
+  </cim:CurrentLimit>
+  <cim:CurrentLimit rdf:ID="_cl_tatl">
+    <cim:IdentifiedObject.name>L1 tatl</cim:IdentifiedObject.name>
+    <cim:OperationalLimit.OperationalLimitSet rdf:resource="#_ols1"/>
+    <cim:OperationalLimit.OperationalLimitType rdf:resource="#_olt_tatl"/>
+    <cim:CurrentLimit.normalValue>500</cim:CurrentLimit.normalValue>
+  </cim:CurrentLimit>
+</rdf:RDF>
