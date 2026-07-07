@@ -63,6 +63,7 @@ mod powsybl_psse;
 mod pslf;
 pub(crate) mod psse;
 mod pypsa;
+mod ravens;
 mod rawx;
 pub mod routing;
 mod surge;
@@ -89,6 +90,7 @@ pub use pypsa::{
 
 pub use cgmes::CgmesVersion;
 pub(crate) use egret::write_egret_json;
+pub use ravens::{parse_ravens_json, write_ravens_json};
 pub(crate) use pandapower::write_pandapower_json;
 pub(crate) use powermodels::write_powermodels_json;
 pub(crate) use powerworld::write_powerworld;
@@ -126,6 +128,9 @@ pub enum TargetFormat {
     Goc3Json,
     /// Surge native JSON network document.
     SurgeJson,
+    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema
+    /// (<https://github.com/lanl-ansi/MG-RAVENS>), balanced subset.
+    RavensJson,
     /// One JSON document from a DeepMind OPFData release. Read only except for
     /// an exact emission back to the retained source format.
     DeepMindOpfDataJson,
@@ -149,6 +154,7 @@ impl TargetFormat {
             | TargetFormat::PandapowerJson
             | TargetFormat::Goc3Json
             | TargetFormat::SurgeJson
+            | TargetFormat::RavensJson
             | TargetFormat::DeepMindOpfDataJson => "json",
             TargetFormat::Psse { .. } => "raw",
             TargetFormat::PsseRawx => "rawx",
@@ -176,6 +182,7 @@ impl TargetFormat {
             TargetFormat::Pslf => "PSLF .epc",
             TargetFormat::Goc3Json => "GO Challenge 3 JSON",
             TargetFormat::SurgeJson => "Surge JSON",
+            TargetFormat::RavensJson => "MG-RAVENS JSON",
             TargetFormat::DeepMindOpfDataJson => "DeepMind OPFData JSON",
             TargetFormat::Xiidm => "XIIDM 1.17 XML",
             TargetFormat::Jiidm => "JIIDM 1.17 JSON",
@@ -200,6 +207,7 @@ impl TargetFormat {
             TargetFormat::Pslf => "pslf",
             TargetFormat::Goc3Json => "goc3-json",
             TargetFormat::SurgeJson => "surge-json",
+            TargetFormat::RavensJson => "ravens-json",
             TargetFormat::DeepMindOpfDataJson => "opfdata-json",
             TargetFormat::Xiidm => "xiidm",
             TargetFormat::Jiidm => "jiidm",
@@ -258,6 +266,7 @@ pub fn parse_target_format(name: &str) -> Option<TargetFormat> {
         TransmissionFormat::Pslf => TargetFormat::Pslf,
         TransmissionFormat::Goc3Json => TargetFormat::Goc3Json,
         TransmissionFormat::SurgeJson => TargetFormat::SurgeJson,
+        TransmissionFormat::RavensJson => TargetFormat::RavensJson,
         TransmissionFormat::DeepMindOpfDataJson => TargetFormat::DeepMindOpfDataJson,
         TransmissionFormat::Xiidm => TargetFormat::Xiidm,
         TransmissionFormat::Jiidm => TargetFormat::Jiidm,
@@ -747,6 +756,7 @@ fn read_source(
             ));
         }
         TargetFormat::SurgeJson => surge::parse_surge_source(text, name_hint, warnings),
+        TargetFormat::RavensJson => ravens::parse_ravens_source(text, name_hint, warnings),
         TargetFormat::DeepMindOpfDataJson => {
             opfdata::parse_opfdata_source(text, name_hint, warnings)
         }
@@ -1155,6 +1165,7 @@ pub(crate) fn emit_value_text(net: &BalancedNetwork, format: TargetFormat) -> Re
         TargetFormat::Matpower => matpower::write_matpower_conversion(net),
         TargetFormat::Pslf => write_pslf(net),
         TargetFormat::SurgeJson => write_surge_json(net),
+        TargetFormat::RavensJson => write_ravens_json(net),
         TargetFormat::Goc3Json => {
             return Err(Error::WriteUnsupported {
                 format: "goc3-json",

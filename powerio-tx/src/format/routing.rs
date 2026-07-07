@@ -53,6 +53,8 @@ pub enum TransmissionFormat {
     Gridfm,
     Goc3Json,
     SurgeJson,
+    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema, balanced profile.
+    RavensJson,
     DeepMindOpfDataJson,
     Xiidm,
     Jiidm,
@@ -83,6 +85,7 @@ impl TransmissionFormat {
             Self::Gridfm => "gridfm",
             Self::Goc3Json => "goc3-json",
             Self::SurgeJson => "surge-json",
+            Self::RavensJson => "ravens-json",
             Self::DeepMindOpfDataJson => "opfdata-json",
             Self::Xiidm => "xiidm",
             Self::Jiidm => "jiidm",
@@ -178,6 +181,9 @@ pub fn parse_transmission_format(name: &str) -> Option<TransmissionFormat> {
         "gridfm" => Some(TransmissionFormat::Gridfm),
         "goc3" | "goc3json" | "go3" | "gochallenge3" | "c3" => Some(TransmissionFormat::Goc3Json),
         "surge" | "surgejson" => Some(TransmissionFormat::SurgeJson),
+        "ravens" | "ravensjson" | "mgravens" | "mgravensjson" => {
+            Some(TransmissionFormat::RavensJson)
+        }
         "xiidm" | "iidm" => Some(TransmissionFormat::Xiidm),
         "jiidm" => Some(TransmissionFormat::Jiidm),
         "cgmes" => Some(TransmissionFormat::Cgmes),
@@ -477,6 +483,13 @@ struct JsonHeader {
     shunt: bool,
     #[serde(default, deserialize_with = "present")]
     switch: bool,
+    // MG-RAVENS documents nest everything under CIM hash tables; the
+    // top-level `ConnectivityNode` / `PowerSystemResource` pair appears in
+    // no other supported dialect.
+    #[serde(default, deserialize_with = "present", rename = "ConnectivityNode")]
+    connectivity_node: bool,
+    #[serde(default, deserialize_with = "present", rename = "PowerSystemResource")]
+    power_system_resource: bool,
 }
 
 impl JsonHeader {
@@ -504,12 +517,14 @@ impl JsonHeader {
                 .metadata
                 .as_ref()
                 .is_some_and(|metadata| metadata.objective);
+        let is_ravens = self.connectivity_node || self.power_system_resource;
         let is_power_models = self.base_mva_camel || self.branch || self.r#gen || self.gencost;
         let transmission = is_pandapower
             || is_egret
             || is_goc3
             || is_rawx
             || is_surge
+            || is_ravens
             || is_opfdata
             || is_power_models;
 
@@ -531,6 +546,8 @@ impl JsonHeader {
                     TransmissionFormat::Goc3Json
                 } else if is_surge {
                     TransmissionFormat::SurgeJson
+                } else if is_ravens {
+                    TransmissionFormat::RavensJson
                 } else if is_opfdata {
                     TransmissionFormat::DeepMindOpfDataJson
                 } else {

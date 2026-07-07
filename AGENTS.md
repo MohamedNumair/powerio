@@ -57,7 +57,7 @@ Formats. MATPOWER `.m`, PSS/E `.raw` (revisions 32 to 35 in, 33 to 35 out),
 PSS/E RAWX 35, PowSybl XIIDM and JIIDM (1.0 to 1.17 in, 1.17 out), CIM CGMES
 (2.4.15 and 3.0 in, 3.0 out), ENTSO-E UCTE-DEF, PowerWorld `.aux`, PSLF
 `.epc`, PowerModels JSON, Egret JSON, pandapower JSON, PyPSA CSV directories,
-and Surge JSON parse and write. The IEEE Common Data Format, DOE GO Challenge
+Surge JSON, and the balanced MG-RAVENS JSON profile parse and write. The IEEE Common Data Format, DOE GO Challenge
 3 problem data, DeepMind OPFData JSON, and PowerWorld `.pwb` are read only;
 a complete `AcScucSolution` writes the official GO Challenge 3 solution
 file. A PowerWorld `.pwd` display parses to `PioValue::GeoLayer`. GridFM

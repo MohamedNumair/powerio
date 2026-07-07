@@ -138,6 +138,7 @@ describe separate interfaces.
 | pandapower JSON | `pandapower-json` | yes | yes |
 | PyPSA CSV directory | `pypsa-csv` | yes | yes |
 | Surge JSON | `surge-json` | yes | yes |
+| MG-RAVENS JSON (balanced profile) | `ravens-json` | yes | yes |
 | GridFM Parquet directory, `gridfm` feature | `gridfm` | yes | yes |
 | DOE GO Challenge 3 JSON | `goc3-json` | problem, or problem with solution | a complete solution |
 | DeepMind OPFData JSON | `opfdata-json` | yes | no |

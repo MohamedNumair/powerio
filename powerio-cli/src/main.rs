@@ -690,6 +690,10 @@ enum FormatArg {
     )]
     DeepMindOpfDataJson,
     /// Parse a gridfm-datakit Parquet dataset directory (parse only).
+    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema (read and write).
+    #[value(name = "ravens-json", alias = "ravens", alias = "mg-ravens")]
+    RavensJson,
+    /// Read a gridfm-datakit Parquet dataset directory (read only).
     #[value(name = "gridfm")]
     Gridfm,
     /// Parse a PowerWorld `.pwb` binary case (parse only).
@@ -749,6 +753,7 @@ impl FormatArg {
             FormatArg::Goc3Json => TargetFormat::Goc3Json,
             FormatArg::SurgeJson => TargetFormat::SurgeJson,
             FormatArg::DeepMindOpfDataJson => TargetFormat::DeepMindOpfDataJson,
+            FormatArg::RavensJson => TargetFormat::RavensJson,
             // PypsaCsv is a transmission format, but it writes a directory, not a
             // text target; `run_convert` handles it before reaching here. gridfm
             // is read only here, and Pwb and IeeeCdf are read only. The
@@ -811,6 +816,7 @@ impl FormatArg {
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
             | FormatArg::DeepMindOpfDataJson
+            | FormatArg::RavensJson
             | FormatArg::Gridfm
             | FormatArg::Pwb
             | FormatArg::IeeeCdf
@@ -844,6 +850,7 @@ impl FormatArg {
             FormatArg::Goc3Json => "goc3-json",
             FormatArg::SurgeJson => "surge-json",
             FormatArg::DeepMindOpfDataJson => "opfdata-json",
+            FormatArg::RavensJson => "ravens-json",
             FormatArg::Gridfm => "gridfm",
             FormatArg::Pwb => "pwb",
             FormatArg::IeeeCdf => "ieee-cdf",
