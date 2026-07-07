@@ -235,7 +235,8 @@ pub fn display_format_from_name(name: &str) -> Option<DisplayFormat> {
 /// `egret-json`/`egret`, `pandapower-json`/`pandapower`/`pp`, `psse`/`raw`,
 /// `powerworld`/`aux`, `powerio-json`/`powerio`/`json` (the canonical snapshot;
 /// plain `json` means this one, the foreign JSON dialects are namespaced),
-/// `pslf`/`epc`, `goc3-json`/`goc3`, and `surge-json`/`surge`.
+/// `pslf`/`epc`, `goc3-json`/`goc3`, `surge-json`/`surge`, and
+/// `dgs`/`digsilent`/`powerfactory`.
 /// Case-insensitive. The one place the bindings (Python, C ABI) share, so a new
 /// text format means one new arm here, not three. PyPSA CSV folders, GridFM
 /// datasets, and PowerWorld `.pwb` are directory or read only inputs with no

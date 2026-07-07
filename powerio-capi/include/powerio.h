@@ -357,7 +357,8 @@ PioNetwork *pio_parse_file(const char *path,
  * Unlike [`pio_parse_file`] there is no path to infer from, so `format` is
  * required: one of `matpower`/`m`, `powermodels`/`pm`, `egret`,
  * `pandapower-json`/`pandapower`/`pp`, `psse`/`raw`, `powerworld`/`aux`,
- * `pslf`/`epc`, `goc3-json`/`goc3`, `surge-json`/`surge`, or `powerio-json`/`json` (the canonical snapshot
+ * `pslf`/`epc`, `goc3-json`/`goc3`, `surge-json`/`surge`,
+ * `dgs`/`digsilent`/`powerfactory`, or `powerio-json`/`json` (the canonical snapshot
  * [`pio_to_format`] writes, validated on read). PyPSA CSV folders are
  * directories, not text; parse them with [`pio_parse_file`] and
  * `from = "pypsa-csv"`. Read fidelity warnings attach to the handle

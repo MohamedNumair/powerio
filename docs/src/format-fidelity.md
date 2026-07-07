@@ -25,6 +25,8 @@ implementations and the matching powerio code:
 | PSLF shunts | EPC `pu_mw`/`pu_mvar` are per unit on `sbase`; `Network::Shunt` stores MW/MVAr at \\(V = 1\\) | paired EPC/RAW case checks | `format::pslf` |
 | GO Challenge 3 time series | `Network` stores the first interval as a static case; `.pio.json` documents carry replayable later intervals in `operating_points` | Rust GOC3 package tests | `format::goc3`, `powerio_pkg::operating` |
 | Surge angles | Surge JSON carries voltage angles, phase shifts, and angle limits in radians; `Network` stores degrees | Rust Surge round trip tests | `format::surge` |
+| DGS impedance | line `r/x` are ohms per km scaled by length and converted with \\(Z_{\mathrm{base}} = V_{\mathrm{kV}}^2 / \mathrm{baseMVA}\\); transformer `uktr`/`uktrr` percent (and `pcutr` copper loss) give \\(r/x\\) on the winding `strn` base, rebased to the system base; line charging is capacitance per km (`cline`), converted via \\(2\pi f_{\mathrm{nom}} \ell Z_{\mathrm{base}}\\) | pandapower PowerFactory converter | `format::dgs` |
+| DGS taps, topology, base | PowerFactory tap steps compose a magnitude ratio and an angle from `nntap`/`dutap`/`phitr`; `StaCubic` cubicle wiring is flattened to bus terminals, closed `ElmCoup` couplers fuse the two terminals and open ones become switches; DGS carries no system base, so `baseMVA` is fixed at \\(100\\) and the frequency comes from `ElmNet.frnom` | pandapower PowerFactory converter | `format::dgs` |
 
 egret's own MATPOWER parser uses the same reductions (bus type as
 `matpower_bustype`, polynomial coefficients reversed to a `{degree: coefficient}`
@@ -182,6 +184,24 @@ code `READ.TRANSMISSION.PARSE_WARNING`. GridFM package reads use
   writer emits a canonical Surge network body for the supported power flow core;
   richer MATPOWER generator capability or ramp columns and unsupported cost
   shapes are reported in `Conversion::warnings`.
+- **DIgSILENT DGS** `.dgs` reads the ASCII export at versions 5.0, 6.0, and 7.0
+  and writes DGS 7.0. The reader maps the static power flow core: terminals to
+  buses, lines (`ElmLne`/`TypLne`, sectioned by `ElmLnesec`), two- and
+  three-winding transformers (`ElmTr2`/`ElmTr3`, star-lowered into
+  \\(Y_{\mathrm{bus}}\\)/connectivity by the indexed view), synchronous, static,
+  and asynchronous machines, the external grid (`ElmXnet`), loads, and shunts,
+  resolving `StaCubic` cubicle topology and fusing closed `ElmCoup` couplers.
+  DGS carries no system base, so the reader synthesizes 100 MVA and takes the
+  frequency from `ElmNet.frnom`. Because DGS has no generator cost model,
+  converting to DGS drops `gencost` and generator capability curves (warned),
+  and a transformer's capacitive line charging has no DGS home (DGS transformers
+  carry only magnetizing shunts), so it is warned on write. Partial line loads
+  (`ElmLodlvp`) are skipped with a count, and graphics (`IntGrf*`), variations,
+  protection, and other unmodeled classes are dropped with one warning per
+  class. Encrypted PowerFactory project exports (`.pfd`, and any binary payload)
+  are rejected with a message pointing to the ASCII DGS export path. A same
+  format write echoes the retained decoded source: byte exact for a UTF-8
+  source, and decoded-normalized for a Latin-1 or UTF-16 source.
 - **gridfm** (read, the `gridfm` feature in `powerio-matrix`) reconstructs a
   `Network` from the gridfm-datakit Parquet dataset: lossy, but it recovers
   everything a power flow needs. That is bus types/voltages/limits, nodal load

@@ -376,7 +376,7 @@ struct TransmissionFormat {
     target: TargetFormat,
 }
 
-const TRANSMISSION_FORMATS: [TransmissionFormat; 8] = [
+const TRANSMISSION_FORMATS: [TransmissionFormat; 9] = [
     TransmissionFormat {
         name: "MATPOWER .m",
         token: "matpower",
@@ -417,17 +417,23 @@ const TRANSMISSION_FORMATS: [TransmissionFormat; 8] = [
         token: "pslf",
         target: TargetFormat::Pslf,
     },
+    TransmissionFormat {
+        name: "DIgSILENT DGS",
+        token: "dgs",
+        target: TargetFormat::Dgs,
+    },
 ];
 
-const TRANSMISSION_WARNING_BASELINE: [[usize; 8]; 8] = [
-    [0, 0, 8, 8, 0, 5, 0, 11],
-    [6, 0, 14, 14, 1, 11, 24, 16],
-    [13, 1, 0, 1, 1, 3, 1, 10],
-    [12, 0, 0, 0, 0, 2, 0, 5],
-    [0, 0, 8, 8, 0, 5, 0, 11],
-    [6, 0, 11, 11, 5, 0, 0, 11],
-    [2, 2, 10, 10, 2, 7, 2, 17],
-    [17, 5, 5, 5, 5, 7, 5, 8],
+const TRANSMISSION_WARNING_BASELINE: [[usize; 9]; 9] = [
+    [0, 0, 8, 8, 0, 5, 0, 11, 27],
+    [6, 0, 14, 14, 1, 11, 24, 16, 33],
+    [13, 1, 0, 1, 1, 3, 1, 10, 20],
+    [12, 0, 0, 0, 0, 2, 0, 5, 19],
+    [0, 0, 8, 8, 0, 5, 0, 11, 27],
+    [6, 0, 11, 11, 5, 0, 0, 11, 24],
+    [2, 2, 10, 10, 2, 7, 2, 17, 29],
+    [17, 5, 5, 5, 5, 7, 5, 8, 24],
+    [18, 12, 12, 12, 12, 13, 12, 17, 24],
 ];
 
 const TRANSMISSION_CASES: [(&str, &str); 6] = [

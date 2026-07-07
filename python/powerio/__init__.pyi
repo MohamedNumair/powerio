@@ -174,6 +174,7 @@ class Network:
         "PypsaCsv",
         "Goc3Json",
         "SurgeJson",
+        "Dgs",
     ]
     read_warnings: List[str]
     n_buses: int

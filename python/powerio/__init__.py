@@ -1,10 +1,10 @@
 """powerio: lossless power system case file IO, conversion, and matrices.
 
 Parse MATPOWER, PSS/E, PowerWorld, PSLF EPC, PowerModels JSON, egret JSON,
-pandapower JSON, PyPSA CSV folders, GO Challenge 3 JSON, Surge JSON, GridFM
-Parquet datasets into one format neutral case; write retained text formats back
-byte exact; convert between formats; package cases as ``.pio.json``; and pull
-the sparse matrices and graph outputs solvers need::
+pandapower JSON, PyPSA CSV folders, GO Challenge 3 JSON, Surge JSON, DIgSILENT
+PowerFactory DGS, GridFM Parquet datasets into one format neutral case; write
+retained text formats back byte exact; convert between formats; package cases as
+``.pio.json``; and pull the sparse matrices and graph outputs solvers need::
 
     import powerio as pio
 
@@ -512,8 +512,8 @@ def parse_file(path: Any, from_: Optional[str] = None) -> Network:
     """Parse a case file from a path, inferring the format from the extension.
 
     Read fidelity warnings are on ``Network.read_warnings`` (empty for readers
-    that don't report any; currently pandapower JSON, PyPSA CSV, and PSLF EPC
-    report them).
+    that don't report any; currently pandapower JSON, PyPSA CSV, PSLF EPC, and
+    DIgSILENT DGS report them).
     """
     return Network(_powerio.parse_file(str(path), from_))
 
@@ -550,8 +550,8 @@ def convert_file(
 
     ``to`` / ``from_`` are format names: ``matpower``, ``powermodels-json``,
     ``egret-json``, ``pandapower-json``, ``psse``, ``powerworld``, ``pslf``,
-    ``goc3-json``, and ``surge-json`` (aliases ``m``, ``pm``, ``egret``,
-    ``pp``, ``raw``, ``aux``, ``epc``, ``goc3``, and ``surge``). The input format is
+    ``goc3-json``, ``surge-json``, and ``dgs`` (aliases ``m``, ``pm``, ``egret``,
+    ``pp``, ``raw``, ``aux``, ``epc``, ``goc3``, ``surge``, and ``digsilent``). The input format is
     inferred from the file extension unless ``from_`` overrides it. GO Challenge
     3 JSON is read only. PyPSA CSV folders are read with
     ``from_="pypsa-csv"`` and written with
