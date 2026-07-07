@@ -47,6 +47,7 @@ pub mod powerworld;
 mod pslf;
 mod psse;
 mod pypsa;
+mod ravens;
 pub mod routing;
 mod surge;
 
@@ -61,6 +62,7 @@ pub use powerworld::{PwdDisplay, PwdSubstation, parse_powerworld, write_powerwor
 pub use pslf::{parse_pslf, write_pslf};
 pub use psse::{parse_psse, write_psse, write_psse_rev};
 pub use pypsa::{PypsaCsvOutputs, read_pypsa_csv_folder, write_pypsa_csv_folder};
+pub use ravens::{parse_ravens_json, write_ravens_json};
 pub use surge::{parse_surge_json, write_surge_json};
 
 /// A target interchange format. See [`write_as`].
@@ -92,6 +94,9 @@ pub enum TargetFormat {
     Goc3Json,
     /// Surge native JSON network document.
     SurgeJson,
+    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema
+    /// (<https://github.com/lanl-ansi/MG-RAVENS>), balanced subset.
+    RavensJson,
 }
 
 impl TargetFormat {
@@ -104,7 +109,8 @@ impl TargetFormat {
             | TargetFormat::PandapowerJson
             | TargetFormat::PowerioJson
             | TargetFormat::Goc3Json
-            | TargetFormat::SurgeJson => "json",
+            | TargetFormat::SurgeJson
+            | TargetFormat::RavensJson => "json",
             TargetFormat::Psse { .. } => "raw",
             TargetFormat::PowerWorld => "aux",
             TargetFormat::Matpower => "m",
@@ -126,6 +132,7 @@ impl TargetFormat {
             TargetFormat::Pslf => "PSLF .epc",
             TargetFormat::Goc3Json => "GO Challenge 3 JSON",
             TargetFormat::SurgeJson => "Surge JSON",
+            TargetFormat::RavensJson => "MG-RAVENS JSON",
         }
     }
 
@@ -145,6 +152,7 @@ impl TargetFormat {
             TargetFormat::Pslf => "pslf",
             TargetFormat::Goc3Json => "goc3-json",
             TargetFormat::SurgeJson => "surge-json",
+            TargetFormat::RavensJson => "ravens-json",
         }
     }
 }
@@ -252,6 +260,7 @@ pub fn target_format_from_name(name: &str) -> Option<TargetFormat> {
         TransmissionFormat::Pslf => TargetFormat::Pslf,
         TransmissionFormat::Goc3Json => TargetFormat::Goc3Json,
         TransmissionFormat::SurgeJson => TargetFormat::SurgeJson,
+        TransmissionFormat::RavensJson => TargetFormat::RavensJson,
         TransmissionFormat::PypsaCsv | TransmissionFormat::Pwb | TransmissionFormat::Gridfm => {
             return None;
         }
@@ -496,6 +505,7 @@ fn read_source(source: Arc<String>, fmt: TargetFormat, name_hint: Option<&str>) 
         TargetFormat::Pslf => pslf::parse_pslf_source(source, name_hint, &mut warnings),
         TargetFormat::Goc3Json => goc3::parse_goc3_source(source, name_hint, &mut warnings),
         TargetFormat::SurgeJson => surge::parse_surge_source(source, name_hint, &mut warnings),
+        TargetFormat::RavensJson => ravens::parse_ravens_source(source, name_hint, &mut warnings),
     }?;
     reject_empty_case(&net, fmt.label())?;
     Ok(Parsed {
@@ -572,6 +582,7 @@ fn transmission_json_target(format: TransmissionFormat) -> Result<TargetFormat> 
         TransmissionFormat::PowerioJson => Ok(TargetFormat::PowerioJson),
         TransmissionFormat::Goc3Json => Ok(TargetFormat::Goc3Json),
         TransmissionFormat::SurgeJson => Ok(TargetFormat::SurgeJson),
+        TransmissionFormat::RavensJson => Ok(TargetFormat::RavensJson),
         other => Err(Error::UnknownFormat(format!(
             "JSON classifier returned non-JSON transmission format `{}`",
             other.name()
@@ -698,6 +709,7 @@ pub fn write_as(net: &Network, format: TargetFormat) -> Result<Conversion> {
         }
         TargetFormat::Pslf => write_pslf(net),
         TargetFormat::SurgeJson => write_surge_json(net),
+        TargetFormat::RavensJson => write_ravens_json(net),
         TargetFormat::Goc3Json => {
             return Err(Error::WriteUnsupported {
                 format: "goc3-json",
@@ -1158,6 +1170,7 @@ fn same_format(target: TargetFormat, source: SourceFormat) -> bool {
             | (TargetFormat::Pslf, SourceFormat::Pslf)
             | (TargetFormat::Goc3Json, SourceFormat::Goc3Json)
             | (TargetFormat::SurgeJson, SourceFormat::SurgeJson)
+            | (TargetFormat::RavensJson, SourceFormat::RavensJson)
     )
 }
 
@@ -1248,6 +1261,7 @@ mod tests {
             (SourceFormat::Pslf, TargetFormat::Pslf),
             (SourceFormat::Goc3Json, TargetFormat::Goc3Json),
             (SourceFormat::SurgeJson, TargetFormat::SurgeJson),
+            (SourceFormat::RavensJson, TargetFormat::RavensJson),
         ] {
             let token = format!("{sf:?}");
             assert_eq!(

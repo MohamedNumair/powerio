@@ -45,6 +45,7 @@ pub enum TransmissionFormat {
     Gridfm,
     Goc3Json,
     SurgeJson,
+    RavensJson,
 }
 
 impl TransmissionFormat {
@@ -65,6 +66,7 @@ impl TransmissionFormat {
             Self::Gridfm => "gridfm",
             Self::Goc3Json => "goc3-json",
             Self::SurgeJson => "surge-json",
+            Self::RavensJson => "ravens-json",
         }
     }
 }
@@ -141,6 +143,9 @@ pub fn transmission_format_from_name(name: &str) -> Option<TransmissionFormat> {
         "gridfm" => Some(TransmissionFormat::Gridfm),
         "goc3" | "goc3json" | "go3" | "gochallenge3" | "c3" => Some(TransmissionFormat::Goc3Json),
         "surge" | "surgejson" => Some(TransmissionFormat::SurgeJson),
+        "ravens" | "ravensjson" | "mgravens" | "mgravensjson" => {
+            Some(TransmissionFormat::RavensJson)
+        }
         _ => None,
     }
 }
@@ -239,6 +244,12 @@ impl JsonShape {
         let is_surge = self.string("format") == Some("surge-json")
             && self.has("schema_version")
             && self.has("network");
+        // MG-RAVENS documents nest everything under CIM hash tables; the
+        // top-level `ConnectivityNode` / `PowerSystemResource` pair appears in
+        // no other supported dialect. Multiconductor RAVENS documents match
+        // too: the reader refuses them with a pointer at the distribution
+        // surface, which beats an "unknown JSON" error.
+        let is_ravens = self.has("ConnectivityNode") || self.has("PowerSystemResource");
         let is_powerio = self.has("buses")
             && (self.has("branches")
                 || self.has("base_mva")
@@ -246,8 +257,13 @@ impl JsonShape {
                 || self.has("generators"));
         let is_power_models =
             self.has("baseMVA") || self.has("branch") || self.has("gen") || self.has("gencost");
-        let transmission =
-            is_pandapower || is_egret || is_goc3 || is_surge || is_powerio || is_power_models;
+        let transmission = is_pandapower
+            || is_egret
+            || is_goc3
+            || is_surge
+            || is_ravens
+            || is_powerio
+            || is_power_models;
 
         let is_pmd = self.has("data_model");
         let strong_bmopf = self.has("line")
@@ -271,6 +287,8 @@ impl JsonShape {
                 TransmissionFormat::Goc3Json
             } else if is_surge {
                 TransmissionFormat::SurgeJson
+            } else if is_ravens {
+                TransmissionFormat::RavensJson
             } else if is_powerio {
                 TransmissionFormat::PowerioJson
             } else {

@@ -182,6 +182,23 @@ code `READ.TRANSMISSION.PARSE_WARNING`. GridFM package reads use
   writer emits a canonical Surge network body for the supported power flow core;
   richer MATPOWER generator capability or ramp columns and unsupported cost
   shapes are reported in `Conversion::warnings`.
+- **MG-RAVENS JSON** reads and writes the balanced subset of the LANL
+  CIM-derived interchange schema
+  ([lanl-ansi/MG-RAVENS](https://github.com/lanl-ansi/MG-RAVENS), profile
+  `mgravens24v1` on CIM100). The writer follows the conventions of the upstream
+  MATPOWER converter (`mpc2ravens.py`) — SI units, `ConnectivityNode` per bus
+  with inline `SvVoltage`, the CIM load sign convention on machines, tap/shift
+  branches as two-end `PowerTransformer` records, the MVA base in an
+  `AlgorithmSettings` record — with deterministic name-derived mRIDs so
+  canonical output is idempotent, and base-voltage anchors on lines and
+  transformer ends so transit buses read back at the right base. Switches,
+  storage, HVDC, 3-winding transformers, area metadata, solver blocks, element
+  extras (the schema closes every class), generator voltage setpoints, and
+  piecewise or beyond-quadratic costs are reported in `Conversion::warnings`.
+  The reader refuses documents carrying multiconductor objects (per-phase
+  records, impedance matrices, wire geometry) and points at the distribution
+  surface instead of dropping phase detail; multiconductor MG-RAVENS for
+  `powerio-dist` is tracked follow-up work.
 - **gridfm** (read, the `gridfm` feature in `powerio-matrix`) reconstructs a
   `Network` from the gridfm-datakit Parquet dataset: lossy, but it recovers
   everything a power flow needs. That is bus types/voltages/limits, nodal load

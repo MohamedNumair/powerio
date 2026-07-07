@@ -163,6 +163,7 @@ the original file type from converting to a different file type.
 | PyPSA CSV folder | yes | yes | directory output, not text echo | PyPSA import validator checks the exported static components |
 | GO Challenge 3 JSON | yes | source echo only | byte exact retained source | first interval maps to the static power flow core; `.pio.json` documents retain time series as operating points |
 | Surge JSON | yes | yes | byte exact retained source | versioned JSON network body; unsupported source sections stay in retained source or warnings |
+| MG-RAVENS JSON | yes | yes | byte exact retained source | balanced subset of the LANL CIM-derived schema (issue #27); multiconductor documents are routed to future powerio-dist support |
 | GridFM Parquet | yes | yes | directory output, deliberately lossy read | recovers the power flow core for conversion back to classical formats |
 
 PowerWorld `.pwd` is display data, not a network case, so it is outside this
