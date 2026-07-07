@@ -17,9 +17,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use powerio::{
-    BusType, Network, TargetFormat, parse_egret_json, parse_matpower_file, parse_powermodels_json,
-    parse_powerworld, parse_pslf, parse_psse, write_as, write_egret_json, write_powermodels_json,
-    write_powerworld, write_pslf, write_psse, write_psse_rev,
+    BusType, Network, TargetFormat, parse_dgs, parse_egret_json, parse_matpower_file,
+    parse_powermodels_json, parse_powerworld, parse_pslf, parse_psse, write_as, write_dgs,
+    write_egret_json, write_powermodels_json, write_powerworld, write_pslf, write_psse,
+    write_psse_rev,
 };
 
 mod common;
@@ -84,13 +85,16 @@ struct ValueFingerprint {
 struct BusValue {
     id: usize,
     kind: BusType,
-    vm: i64,
-    va: i64,
+    // DGS carries no solved state (vm/va are re-derived), no bus voltage band
+    // (vmax/vmin default), and no area/zone model, so those are dropped for a
+    // DGS round trip; `None` marks a field the target does not preserve.
+    vm: Option<i64>,
+    va: Option<i64>,
     base_kv: i64,
-    vmax: i64,
-    vmin: i64,
-    area: usize,
-    zone: usize,
+    vmax: Option<i64>,
+    vmin: Option<i64>,
+    area: Option<usize>,
+    zone: Option<usize>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -109,8 +113,9 @@ struct BranchValue {
     x: i64,
     b: Option<i64>,
     rate_a: i64,
-    rate_b: i64,
-    rate_c: i64,
+    // DGS carries one thermal rating per branch, so rate_b/rate_c are dropped.
+    rate_b: Option<i64>,
+    rate_c: Option<i64>,
     tap: i64,
     shift: i64,
     in_service: bool,
@@ -124,10 +129,13 @@ struct GeneratorValue {
     occurrence: usize,
     pg: i64,
     qg: i64,
-    pmax: i64,
-    pmin: i64,
-    qmax: i64,
-    qmin: i64,
+    // DGS writes the reference generator as an ElmXnet (wide short-circuit
+    // limits, not dispatch limits) and other machines through a lossy
+    // sgn/cosn encoding, so P/Q limits are not preserved.
+    pmax: Option<i64>,
+    pmin: Option<i64>,
+    qmax: Option<i64>,
+    qmin: Option<i64>,
     vg: Option<i64>,
     mbase: i64,
     in_service: bool,
@@ -140,7 +148,7 @@ fn round_value(x: f64) -> i64 {
 fn value_fingerprint(net: &Network, target: TargetFormat) -> ValueFingerprint {
     ValueFingerprint {
         base_mva: round_value(net.base_mva),
-        buses: bus_values(net),
+        buses: bus_values(net, target),
         // Sum only in-service injections: the by-bus aggregation cannot carry a
         // per-element service flag, so counting out-of-service p/q would both
         // mask a writer that flips in_service and fail a writer that correctly
@@ -162,20 +170,21 @@ fn value_fingerprint(net: &Network, target: TargetFormat) -> ValueFingerprint {
     }
 }
 
-fn bus_values(net: &Network) -> Vec<BusValue> {
+fn bus_values(net: &Network, target: TargetFormat) -> Vec<BusValue> {
+    let keeps_state = target != TargetFormat::Dgs;
     let mut buses: Vec<_> = net
         .buses
         .iter()
         .map(|bus| BusValue {
             id: bus.id.0,
             kind: bus.kind,
-            vm: round_value(bus.vm),
-            va: round_value(bus.va),
+            vm: keeps_state.then(|| round_value(bus.vm)),
+            va: keeps_state.then(|| round_value(bus.va)),
             base_kv: round_value(bus.base_kv),
-            vmax: round_value(bus.vmax),
-            vmin: round_value(bus.vmin),
-            area: bus.area,
-            zone: bus.zone,
+            vmax: keeps_state.then(|| round_value(bus.vmax)),
+            vmin: keeps_state.then(|| round_value(bus.vmin)),
+            area: keeps_state.then_some(bus.area),
+            zone: keeps_state.then_some(bus.zone),
         })
         .collect();
     buses.sort_by_key(|b| b.id);
@@ -213,17 +222,22 @@ fn branch_values(net: &Network, target: TargetFormat) -> Vec<BranchValue> {
                 .entry(key)
                 .and_modify(|n| *n += 1)
                 .or_insert(0);
+            // PSLF and DGS both drop a transformer's line charging (their
+            // transformer records carry no symmetric susceptance column); DGS also
+            // drops rate_b/rate_c (one thermal rating per branch).
+            let keeps_transformer_b = !(matches!(target, TargetFormat::Pslf | TargetFormat::Dgs)
+                && branch.is_transformer());
+            let keeps_extra_ratings = target != TargetFormat::Dgs;
             BranchValue {
                 from: branch.from.0,
                 to: branch.to.0,
                 occurrence,
                 r: round_value(branch.r),
                 x: round_value(branch.x),
-                b: (!(target == TargetFormat::Pslf && branch.is_transformer()))
-                    .then_some(round_value(branch.legacy_total_charging_b())),
+                b: keeps_transformer_b.then_some(round_value(branch.legacy_total_charging_b())),
                 rate_a: round_value(branch.rate_a),
-                rate_b: round_value(branch.rate_b),
-                rate_c: round_value(branch.rate_c),
+                rate_b: keeps_extra_ratings.then_some(round_value(branch.rate_b)),
+                rate_c: keeps_extra_ratings.then_some(round_value(branch.rate_c)),
                 tap: round_value(branch.tap),
                 shift: round_value(branch.shift),
                 in_service: branch.in_service,
@@ -246,15 +260,16 @@ fn generator_values(net: &Network, target: TargetFormat) -> Vec<GeneratorValue> 
                 .entry(generator.bus.0)
                 .and_modify(|n| *n += 1)
                 .or_insert(0);
+            let keeps_limits = target != TargetFormat::Dgs;
             GeneratorValue {
                 bus: generator.bus.0,
                 occurrence,
                 pg: round_value(generator.pg),
                 qg: round_value(generator.qg),
-                pmax: round_value(generator.pmax),
-                pmin: round_value(generator.pmin),
-                qmax: round_value(generator.qmax),
-                qmin: round_value(generator.qmin),
+                pmax: keeps_limits.then_some(round_value(generator.pmax)),
+                pmin: keeps_limits.then_some(round_value(generator.pmin)),
+                qmax: keeps_limits.then_some(round_value(generator.qmax)),
+                qmin: keeps_limits.then_some(round_value(generator.qmin)),
                 vg: (target != TargetFormat::Pslf).then_some(round_value(generator.vg)),
                 mbase: round_value(generator.mbase),
                 in_service: generator.in_service,
@@ -347,6 +362,12 @@ fn roundtrippable() -> Vec<Roundtrippable> {
             write: |n| write_pslf(n).text,
             read: |s| parse_pslf(s).unwrap(),
         },
+        Roundtrippable {
+            name: "DIgSILENT DGS",
+            format: TargetFormat::Dgs,
+            write: |n| write_dgs(n).text,
+            read: |s| parse_dgs(s).unwrap(),
+        },
     ]
 }
 
@@ -383,6 +404,39 @@ fn stable_element_values_preserved_through_each_format() {
     }
 }
 
+/// Compare two DGS documents cell by cell: identical table structure and
+/// identifiers, with numeric cells equal within a relative tolerance (the
+/// physical ↔ per-unit round trip is not bit-exact in f64).
+fn dgs_cells_approx_eq(a: &str, b: &str) -> bool {
+    let la: Vec<&str> = a.lines().collect();
+    let lb: Vec<&str> = b.lines().collect();
+    if la.len() != lb.len() {
+        return false;
+    }
+    for (x, y) in la.iter().zip(&lb) {
+        let tx: Vec<&str> = x.split(';').collect();
+        let ty: Vec<&str> = y.split(';').collect();
+        if tx.len() != ty.len() {
+            return false;
+        }
+        for (p, q) in tx.iter().zip(&ty) {
+            if p == q {
+                continue;
+            }
+            match (p.parse::<f64>(), q.parse::<f64>()) {
+                (Ok(fp), Ok(fq)) => {
+                    let tol = 1e-9 * fp.abs().max(fq.abs()).max(1.0);
+                    if (fp - fq).abs() > tol {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+    }
+    true
+}
+
 #[test]
 fn reader_writer_is_idempotent() {
     for case in CASES {
@@ -397,6 +451,15 @@ fn reader_writer_is_idempotent() {
                 let v1: serde_json::Value = serde_json::from_str(&t1).unwrap();
                 assert!(
                     json_approx_eq(&v0, &v1),
+                    "{case} via {}: serialize→read→serialize not stable",
+                    fmt.name
+                );
+            } else if fmt.format == TargetFormat::Dgs {
+                // DGS stores physical values (Ω/km, µF/km, uk%), so the per-unit ↔
+                // physical round-trip is not bit-exact in f64 either; the table
+                // structure is stable and numeric cells match within tolerance.
+                assert!(
+                    dgs_cells_approx_eq(&t0, &t1),
                     "{case} via {}: serialize→read→serialize not stable",
                     fmt.name
                 );

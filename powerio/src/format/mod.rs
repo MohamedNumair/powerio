@@ -38,6 +38,7 @@ use crate::network::{Branch, BranchRatingSet, Bus, BusId, BusType, Network, Sour
 use crate::{Error, Result};
 use routing::{Detection, JsonClass, SourceFormat as DetectedFormat, TransmissionFormat};
 
+mod dgs;
 mod egret;
 mod goc3;
 mod matpower;
@@ -50,6 +51,7 @@ mod pypsa;
 pub mod routing;
 mod surge;
 
+pub use dgs::{parse_dgs, write_dgs};
 pub use egret::{parse_egret_json, write_egret_json};
 #[doc(hidden)]
 pub use goc3::bridge as goc3_bridge;
@@ -92,6 +94,9 @@ pub enum TargetFormat {
     Goc3Json,
     /// Surge native JSON network document.
     SurgeJson,
+    /// DIgSILENT PowerFactory DGS ASCII (`.dgs`). Read supports DGS versions
+    /// 5/6/7; the writer emits DGS 7.0.
+    Dgs,
 }
 
 impl TargetFormat {
@@ -109,6 +114,7 @@ impl TargetFormat {
             TargetFormat::PowerWorld => "aux",
             TargetFormat::Matpower => "m",
             TargetFormat::Pslf => "epc",
+            TargetFormat::Dgs => "dgs",
         }
     }
 
@@ -126,6 +132,7 @@ impl TargetFormat {
             TargetFormat::Pslf => "PSLF .epc",
             TargetFormat::Goc3Json => "GO Challenge 3 JSON",
             TargetFormat::SurgeJson => "Surge JSON",
+            TargetFormat::Dgs => "DIgSILENT DGS",
         }
     }
 
@@ -145,6 +152,7 @@ impl TargetFormat {
             TargetFormat::Pslf => "pslf",
             TargetFormat::Goc3Json => "goc3-json",
             TargetFormat::SurgeJson => "surge-json",
+            TargetFormat::Dgs => "dgs",
         }
     }
 }
@@ -252,6 +260,7 @@ pub fn target_format_from_name(name: &str) -> Option<TargetFormat> {
         TransmissionFormat::Pslf => TargetFormat::Pslf,
         TransmissionFormat::Goc3Json => TargetFormat::Goc3Json,
         TransmissionFormat::SurgeJson => TargetFormat::SurgeJson,
+        TransmissionFormat::Dgs => TargetFormat::Dgs,
         TransmissionFormat::PypsaCsv | TransmissionFormat::Pwb | TransmissionFormat::Gridfm => {
             return None;
         }
@@ -358,6 +367,14 @@ fn is_pslf_name(name: &str) -> bool {
     )
 }
 
+/// Whether a source format name means DIgSILENT DGS.
+fn is_dgs_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().replace(['-', '_'], "").as_str(),
+        "dgs" | "digsilent" | "powerfactory" | "powerfactorydgs"
+    )
+}
+
 /// Parse the case file at `path`, choosing the reader from `from` (the
 /// [`target_format_from_name`] names plus `pypsa-csv`/`pypsa`, `pwb`, `pslf`,
 /// and `epc`) or, when `None`, from the path: a directory containing
@@ -419,6 +436,26 @@ pub fn parse_file(path: impl AsRef<std::path::Path>, from: Option<&str>) -> Resu
         let mut warnings = Vec::new();
         let network = pslf::parse_pslf_source(Arc::new(text), stem, &mut warnings)?;
         reject_empty_case(&network, "PSLF .epc")?;
+        return Ok(Parsed { network, warnings });
+    }
+    // An encrypted PowerFactory project export `.pfd` is binary; reject it by
+    // extension with the friendly "export ASCII DGS instead" guidance before any
+    // read, so the caller is not handed a UTF-8 error.
+    if from.is_none() && ext.as_deref() == Some("pfd") {
+        return Err(dgs::pfd_rejection());
+    }
+    // DIgSILENT DGS is ASCII but the official example files ship as ISO-8859-1
+    // (Latin-1) with CRLF and some are UTF-16. Read the raw bytes and decode
+    // through the format's own BOM-sniffing decoder (UTF-8 / UTF-16 LE / UTF-16
+    // BE, else Latin-1 where every byte maps), then retain the decoded text as
+    // source for the same-format echo.
+    if from.is_some_and(is_dgs_name) || (from.is_none() && ext.as_deref() == Some("dgs")) {
+        let bytes = std::fs::read(path)?;
+        let text = dgs::decode_dgs_bytes(&bytes);
+        let stem = path.file_stem().and_then(|s| s.to_str());
+        let mut warnings = Vec::new();
+        let network = dgs::parse_dgs_source(Arc::new(text), stem, &mut warnings)?;
+        reject_empty_case(&network, "DIgSILENT DGS")?;
         return Ok(Parsed { network, warnings });
     }
     // Settle the format before touching the file: an unmapped or binary
@@ -494,6 +531,9 @@ fn read_source(source: Arc<String>, fmt: TargetFormat, name_hint: Option<&str>) 
         // PSLF read normally enters through the `is_pslf_name`/`.epc` fast path in
         // parse_file / parse_str; this arm keeps the funnel total.
         TargetFormat::Pslf => pslf::parse_pslf_source(source, name_hint, &mut warnings),
+        // DGS read normally enters through the `is_dgs_name`/`.dgs` fast path in
+        // parse_file / parse_str; this arm keeps the funnel total.
+        TargetFormat::Dgs => dgs::parse_dgs_source(source, name_hint, &mut warnings),
         TargetFormat::Goc3Json => goc3::parse_goc3_source(source, name_hint, &mut warnings),
         TargetFormat::SurgeJson => surge::parse_surge_source(source, name_hint, &mut warnings),
     }?;
@@ -591,6 +631,12 @@ pub fn parse_str(text: &str, format: &str) -> Result<Parsed> {
         let mut warnings = Vec::new();
         let network = pslf::parse_pslf_source(Arc::new(text.to_owned()), None, &mut warnings)?;
         reject_empty_case(&network, "PSLF .epc")?;
+        return Ok(Parsed { network, warnings });
+    }
+    if is_dgs_name(format) {
+        let mut warnings = Vec::new();
+        let network = dgs::parse_dgs_source(Arc::new(text.to_owned()), None, &mut warnings)?;
+        reject_empty_case(&network, "DIgSILENT DGS")?;
         return Ok(Parsed { network, warnings });
     }
     let fmt = target_format_from_name(format).ok_or_else(|| unknown_source_format(format))?;
@@ -697,6 +743,7 @@ pub fn write_as(net: &Network, format: TargetFormat) -> Result<Conversion> {
             });
         }
         TargetFormat::Pslf => write_pslf(net),
+        TargetFormat::Dgs => write_dgs(net),
         TargetFormat::SurgeJson => write_surge_json(net),
         TargetFormat::Goc3Json => {
             return Err(Error::WriteUnsupported {
@@ -813,7 +860,9 @@ fn warn_psse_downgrade(net: &Network, format: TargetFormat, conv: &mut Conversio
 fn warn_dropped_frequency(net: &Network, format: TargetFormat, conv: &mut Conversion) {
     let carries_frequency = matches!(
         format,
-        TargetFormat::Psse { .. } | TargetFormat::PandapowerJson
+        // PSS/E `BASFRQ`, pandapower `f_hz`, and DGS `ElmNet.frnom` all carry the
+        // system base frequency, so writing to them loses nothing.
+        TargetFormat::Psse { .. } | TargetFormat::PandapowerJson | TargetFormat::Dgs
     );
     if carries_frequency {
         return;
@@ -992,6 +1041,9 @@ fn warn_missing_reference(net: &Network, format: TargetFormat, conv: &mut Conver
             | TargetFormat::PandapowerJson
             | TargetFormat::Pslf
             | TargetFormat::SurgeJson
+            // The DGS writer emits an ElmXnet external grid for the Ref bus, so a
+            // slackless network converts without one.
+            | TargetFormat::Dgs
     );
     if needs_ref {
         conv.warnings.extend(missing_reference_warning(net));
@@ -1158,6 +1210,7 @@ fn same_format(target: TargetFormat, source: SourceFormat) -> bool {
             | (TargetFormat::Pslf, SourceFormat::Pslf)
             | (TargetFormat::Goc3Json, SourceFormat::Goc3Json)
             | (TargetFormat::SurgeJson, SourceFormat::SurgeJson)
+            | (TargetFormat::Dgs, SourceFormat::Dgs)
     )
 }
 
