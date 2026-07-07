@@ -301,6 +301,9 @@ enum FormatArg {
     /// Surge native JSON network document.
     #[value(name = "surge-json", alias = "surge")]
     SurgeJson,
+    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema (read and write).
+    #[value(name = "ravens-json", alias = "ravens", alias = "mg-ravens")]
+    RavensJson,
     /// Read a gridfm-datakit Parquet dataset directory (read only).
     #[value(name = "gridfm")]
     Gridfm,
@@ -337,6 +340,7 @@ impl FormatArg {
             FormatArg::Pslf => TargetFormat::Pslf,
             FormatArg::Goc3Json => TargetFormat::Goc3Json,
             FormatArg::SurgeJson => TargetFormat::SurgeJson,
+            FormatArg::RavensJson => TargetFormat::RavensJson,
             // PypsaCsv is a transmission format, but it writes a directory, not a
             // text target; `run_convert` handles it before reaching here. gridfm
             // is read only here, and Pwb is read only. The distribution formats
@@ -373,6 +377,7 @@ impl FormatArg {
             | FormatArg::Pslf
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
+            | FormatArg::RavensJson
             | FormatArg::Gridfm
             | FormatArg::Pwb => None,
         }
@@ -394,6 +399,7 @@ impl FormatArg {
             FormatArg::Pslf => "pslf",
             FormatArg::Goc3Json => "goc3-json",
             FormatArg::SurgeJson => "surge-json",
+            FormatArg::RavensJson => "ravens-json",
             FormatArg::Gridfm => "gridfm",
             FormatArg::Pwb => "pwb",
             FormatArg::Dss => "dss",

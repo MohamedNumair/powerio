@@ -31,7 +31,7 @@ graph views for any downstream solver. Feeds the GridFM ML pipeline.
 
 Formats. MATPOWER `.m`, PowerModels JSON, PSS/E `.raw` (v33/34/35),
 PowerWorld `.aux`, PSLF `.epc`, egret JSON, pandapower JSON, PyPSA CSV folders,
-Surge JSON, and PowerIO JSON all read and write. GO Challenge 3 JSON is a read
+Surge JSON, MG-RAVENS JSON, and PowerIO JSON all read and write. GO Challenge 3 JSON is a read
 only input with byte exact same source echo; PowerWorld `.pwb` is a read only
 binary input with no writer. PowerWorld `.pwd` display files use the display
 API. GridFM Parquet datasets read and write through directory helpers.

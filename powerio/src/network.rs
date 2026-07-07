@@ -233,6 +233,9 @@ pub enum SourceFormat {
     Goc3Json,
     /// Read from a Surge native JSON document.
     SurgeJson,
+    /// Read from an MG-RAVENS JSON document (the LANL CIM-derived interchange
+    /// schema), balanced subset.
+    RavensJson,
 }
 
 impl SourceFormat {
@@ -257,6 +260,7 @@ impl SourceFormat {
             SourceFormat::PypsaCsv => "pypsa-csv",
             SourceFormat::Goc3Json => "goc3-json",
             SourceFormat::SurgeJson => "surge-json",
+            SourceFormat::RavensJson => "ravens-json",
         }
     }
 }

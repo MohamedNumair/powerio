@@ -550,8 +550,9 @@ def convert_file(
 
     ``to`` / ``from_`` are format names: ``matpower``, ``powermodels-json``,
     ``egret-json``, ``pandapower-json``, ``psse``, ``powerworld``, ``pslf``,
-    ``goc3-json``, and ``surge-json`` (aliases ``m``, ``pm``, ``egret``,
-    ``pp``, ``raw``, ``aux``, ``epc``, ``goc3``, and ``surge``). The input format is
+    ``goc3-json``, ``surge-json``, and ``ravens-json`` (aliases ``m``, ``pm``,
+    ``egret``, ``pp``, ``raw``, ``aux``, ``epc``, ``goc3``, ``surge``, and
+    ``ravens``). The input format is
     inferred from the file extension unless ``from_`` overrides it. GO Challenge
     3 JSON is read only. PyPSA CSV folders are read with
     ``from_="pypsa-csv"`` and written with

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- MG-RAVENS JSON (#27): `ravens-json` reads and writes the balanced subset of
+  the LANL CIM-derived interchange schema (lanl-ansi/MG-RAVENS, profile
+  `mgravens24v1`), following the upstream MATPOWER converter's conventions with
+  deterministic mRIDs, canonical-write idempotence, itemized fidelity warnings,
+  and JSON auto-detection; multiconductor documents are refused with a pointer
+  at the distribution surface.
+
 ## 0.6.3
 
 - Arrow matrix axes (#234): the C ABI Arrow export gains a table catalog and
