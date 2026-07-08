@@ -316,7 +316,7 @@ enum FormatArg {
     /// IEEE BMOPF JSON distribution case (read and write).
     #[value(name = "bmopf-json", alias = "bmopf")]
     BmopfJson,
-    /// Distribution CIM (IEC 61968-13 / GridAPPS-D) CIMXML case (read only).
+    /// Distribution CIM (IEC 61968-13 / GridAPPS-D) CIMXML case (read and write).
     #[value(name = "cim", alias = "cim-xml", alias = "cimxml")]
     Cim,
 }
@@ -364,6 +364,7 @@ impl FormatArg {
             FormatArg::Dss => Some(DistTargetFormat::Dss),
             FormatArg::PmdJson => Some(DistTargetFormat::PmdJson),
             FormatArg::BmopfJson => Some(DistTargetFormat::BmopfJson),
+            FormatArg::Cim => Some(DistTargetFormat::CimXml),
             FormatArg::Matpower
             | FormatArg::PowerModelsJson
             | FormatArg::EgretJson
@@ -378,9 +379,7 @@ impl FormatArg {
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
             | FormatArg::Gridfm
-            | FormatArg::Pwb
-            // CIM is a read-only distribution source, not a writable target.
-            | FormatArg::Cim => None,
+            | FormatArg::Pwb => None,
         }
     }
 
@@ -1324,9 +1323,7 @@ fn run_convert(
     // input family comes from --from (gridfm reads into the transmission
     // model), from a clear extension, or from the shared JSON classifier.
     let input_is_dist = if let Some(f) = from {
-        // CIM is a read-only distribution source, so it has no writable
-        // distribution target but still belongs to the distribution family.
-        Some(f == FormatArg::Cim || f.distribution().is_some())
+        Some(f.distribution().is_some())
     } else {
         infer_input_family(input)?
     };

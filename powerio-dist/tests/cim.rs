@@ -127,6 +127,85 @@ fn xml_extension_and_cim_token_both_route() {
     let text = std::fs::read_to_string(fixture()).unwrap();
     let net = parse_str(&text, "cim").unwrap();
     assert_eq!(net.buses.len(), 4);
-    // Read only: `cim` is not a writable distribution target.
-    assert_eq!(powerio_dist::dist_target_from_name("cim"), None);
+    // `cim` is a full writable distribution target.
+    assert_eq!(
+        powerio_dist::dist_target_from_name("cim"),
+        Some(DistTargetFormat::CimXml)
+    );
+}
+
+/// The writer is the reader's inverse: parse → write → parse preserves the
+/// projection, imported mRIDs pass through, and a second write is byte
+/// identical.
+#[test]
+fn cim_writer_round_trips() {
+    let net = parse_cim_file(fixture()).unwrap();
+    let first = net.to_canonical_format(DistTargetFormat::CimXml);
+    let back = parse_str(&first.text, "cim").unwrap();
+
+    assert_eq!(back.buses.len(), net.buses.len());
+    assert_eq!(back.lines.len(), net.lines.len());
+    assert_eq!(back.loads.len(), net.loads.len());
+    assert_eq!(back.shunts.len(), net.shunts.len());
+    assert_eq!(back.switches.len(), net.switches.len());
+    assert_eq!(back.transformers.len(), net.transformers.len());
+    assert_eq!(back.sources.len(), net.sources.len());
+
+    let lc_a = net.linecode(&net.lines[0].linecode).unwrap();
+    let lc_b = back.linecode(&back.lines[0].linecode).unwrap();
+    for i in 0..lc_a.n_conductors {
+        for j in 0..lc_a.n_conductors {
+            assert!(close(lc_a.r_series[i][j], lc_b.r_series[i][j]), "r {i}{j}");
+            assert!(close(lc_a.x_series[i][j], lc_b.x_series[i][j]), "x {i}{j}");
+            assert!(
+                close(
+                    lc_a.b_from[i][j] + lc_a.b_to[i][j],
+                    lc_b.b_from[i][j] + lc_b.b_to[i][j]
+                ),
+                "b {i}{j}"
+            );
+        }
+    }
+    assert_eq!(back.loads[0].p_nom, net.loads[0].p_nom);
+    assert_eq!(back.loads[0].configuration, net.loads[0].configuration);
+    assert!(close(back.shunts[0].b[0][0], net.shunts[0].b[0][0]));
+    let (a, b) = (&net.transformers[0], &back.transformers[0]);
+    assert_eq!(a.windings[0].conn, b.windings[0].conn);
+    assert!(close(a.windings[0].v_ref, b.windings[0].v_ref));
+    assert!(
+        close(a.windings[0].r_pct, b.windings[0].r_pct),
+        "r_pct {} vs {}",
+        a.windings[0].r_pct,
+        b.windings[0].r_pct
+    );
+    assert!(
+        close(a.xsc_pct[0], b.xsc_pct[0]),
+        "xsc {} vs {}",
+        a.xsc_pct[0],
+        b.xsc_pct[0]
+    );
+    assert!(close(
+        net.sources[0].v_magnitude[0],
+        back.sources[0].v_magnitude[0]
+    ));
+
+    // Deterministic ids: the reparse carries the same mRIDs, so a second
+    // write is byte identical.
+    let second = back.to_canonical_format(DistTargetFormat::CimXml);
+    assert_eq!(first.text, second.text);
+
+    // Same-format echo tier: a single-document parse retains its source.
+    assert_eq!(back.to_format(DistTargetFormat::CimXml).text, first.text);
+}
+
+/// dss → CIM: any distribution source now writes CIM.
+#[test]
+fn dss_converts_to_cim() {
+    let dss = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/data/dist/micro/xfmr_single_phase.dss");
+    let net = parse_file(dss, None).unwrap();
+    let conv = net.to_canonical_format(DistTargetFormat::CimXml);
+    let back = parse_str(&conv.text, "cim").unwrap();
+    assert_eq!(back.transformers.len(), net.transformers.len());
+    assert_eq!(back.loads.len(), net.loads.len());
 }

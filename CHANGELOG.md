@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Distribution CIM export: `cim` is now a writable `DistTargetFormat` —
+  `write_cim_xml` emits one CIM100 document (per-phase ACLineSegment with
+  PerLengthPhaseImpedance rows, EnergyConsumer/ShuntCompensator phases,
+  switches, two-winding PowerTransformer ends, EnergySource) with
+  deterministic mRIDs riding the `cim_mrid` extras, so OpenDSS/PMD/BMOPF
+  cases convert into CIM and write → read → write is byte stable.
+  Single-document parses retain their source for the byte-exact echo tier.
 - Distribution CIM import: `powerio-dist` reads IEC 61968-13 / GridAPPS-D
   CIMXML feeders (`parse_cim_file`, the `cim` format name, `.xml` files or
   directories) into the multiconductor `DistNetwork`, so a CIM feeder converts

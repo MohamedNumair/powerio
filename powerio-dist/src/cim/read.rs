@@ -26,7 +26,10 @@ const FMT: &str = "distribution CIM";
 /// [`Error::Xml`] on malformed XML, or when the document declares no CIM
 /// namespace or has no `ConnectivityNode` records.
 pub fn parse_cim_str(text: &str) -> Result<DistNetwork> {
-    parse_cim_documents(vec![parse_cimxml(text)?], None)
+    let mut net = parse_cim_documents(vec![parse_cimxml(text)?], None)?;
+    // One document has a byte-exact echo; merged multi-file sets do not.
+    net.source = Some(Arc::new(text.to_string()));
+    Ok(net)
 }
 
 /// Parse a distribution CIM file, or a directory of CIM instance files read as
@@ -87,14 +90,20 @@ pub(crate) fn parse_cim_paths(paths: &[PathBuf], name_hint: Option<&str>) -> Res
         });
     }
     let mut docs = Vec::new();
+    let mut sole_text = None;
     for path in paths {
         let text = std::fs::read_to_string(path).map_err(|source| Error::Io {
             path: path.display().to_string(),
             source,
         })?;
         docs.push(parse_cimxml(&text)?);
+        sole_text = if paths.len() == 1 { Some(text) } else { None };
     }
-    parse_cim_documents(docs, name_hint)
+    let mut net = parse_cim_documents(docs, name_hint)?;
+    if let Some(text) = sole_text {
+        net.source = Some(Arc::new(text));
+    }
+    Ok(net)
 }
 
 // ---------------------------------------------------------------------------

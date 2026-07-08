@@ -37,6 +37,8 @@ pub enum DistTargetFormat {
     Dss,
     BmopfJson,
     PmdJson,
+    /// Distribution CIM (IEC 61968-13 / GridAPPS-D CIM100) CIMXML.
+    CimXml,
 }
 
 /// Resolves common names and file extensions to a target format.
@@ -46,6 +48,7 @@ pub fn dist_target_from_name(name: &str) -> Option<DistTargetFormat> {
         "dss" | "opendss" => Some(DistTargetFormat::Dss),
         "pmd" | "pmdjson" | "engineering" => Some(DistTargetFormat::PmdJson),
         "bmopf" | "bmopfjson" => Some(DistTargetFormat::BmopfJson),
+        "cim" | "cimxml" | "cimrdf" | "cdpsm" => Some(DistTargetFormat::CimXml),
         _ => None,
     }
 }
@@ -68,6 +71,7 @@ impl DistTargetFormat {
             DistTargetFormat::Dss => "dss",
             DistTargetFormat::PmdJson => "pmd-json",
             DistTargetFormat::BmopfJson => "bmopf-json",
+            DistTargetFormat::CimXml => "cim",
         }
     }
 }
@@ -122,6 +126,7 @@ pub fn parse_str(text: &str, format: &str) -> crate::Result<DistNetwork> {
         DistTargetFormat::Dss => Ok(crate::dss::parse_dss_str(text)),
         DistTargetFormat::BmopfJson => crate::bmopf::parse_bmopf_str(text),
         DistTargetFormat::PmdJson => crate::pmd::parse_pmd_str(text),
+        DistTargetFormat::CimXml => crate::cim::parse_cim_str(text),
     }
 }
 
@@ -168,6 +173,7 @@ pub fn parse_file(
         DistTargetFormat::Dss => crate::dss::parse_dss_file(path),
         DistTargetFormat::BmopfJson => crate::bmopf::parse_bmopf_str(&read(path)?),
         DistTargetFormat::PmdJson => crate::pmd::parse_pmd_str(&read(path)?),
+        DistTargetFormat::CimXml => crate::cim::parse_cim_file(path),
     }
 }
 
@@ -210,6 +216,7 @@ impl DistTargetFormat {
             (DistTargetFormat::Dss, DistSourceFormat::Dss)
                 | (DistTargetFormat::BmopfJson, DistSourceFormat::BmopfJson)
                 | (DistTargetFormat::PmdJson, DistSourceFormat::PmdJson)
+                | (DistTargetFormat::CimXml, DistSourceFormat::Cim)
         )
     }
 }
@@ -221,6 +228,7 @@ impl DistNetwork {
             DistTargetFormat::Dss => crate::dss::write_dss(self),
             DistTargetFormat::BmopfJson => crate::bmopf::write_bmopf_json(self),
             DistTargetFormat::PmdJson => crate::pmd::write_pmd_json(self),
+            DistTargetFormat::CimXml => crate::cim::write_cim_xml(self),
         }
     }
 

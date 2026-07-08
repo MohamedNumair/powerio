@@ -7,9 +7,11 @@ IEEE PES Task Force on Benchmarking Multiconductor OPF
 (<https://github.com/frederikgeth/bmopf-report>).
 
 Distribution CIM (IEC 61968-13 / the GridAPPS-D CIMHub profile, CIM100 CIMXML)
-reads in through `parse_cim_file` / the `cim` format name, so a CIM feeder
-converts to OpenDSS, PMD, and BMOPF like any other source. It is import only
-for now (the writer is roadmap), and reads the per-phase equipment CIM
+reads and writes through the `cim` format name (`parse_cim_file` /
+`write_cim_xml`), so a CIM feeder converts to and from OpenDSS, PMD, and
+BMOPF like any other member of the hub. The writer emits one CIM100 document
+with deterministic mRIDs (write → read → write is byte stable, and
+single-document parses keep the byte-exact echo tier). The reader reads the per-phase equipment CIM
 distribution uses — `ConnectivityNode` buses, `ACLineSegment` with
 `ACLineSegmentPhase` and `PerLengthPhaseImpedance`/`PerLengthSequenceImpedance`,
 `EnergyConsumer`, `LinearShuntCompensator`, the switch family, `EnergySource`,

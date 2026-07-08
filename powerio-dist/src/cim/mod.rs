@@ -15,9 +15,10 @@
 //! the [`xml`] layer is a self-contained copy of the transmission reader's —
 //! the two crates stay decoupled by design.
 //!
-//! Import only: the CIM writer (`DistNetwork` → CIM XML) is tracked follow-up
-//! work, so `cim` has no [`DistTargetFormat`](crate::DistTargetFormat) and the
-//! reader retains no source text (no byte-exact echo tier).
+//! The writer ([`write_cim_xml`]) emits one CIM100 document with
+//! deterministic mRIDs (imported ids pass through the `cim_mrid` extras), so
+//! write → read → write is byte stable; single-document parses retain their
+//! source for the byte-exact echo tier (multi-file sets cannot).
 //!
 //! # Phase convention
 //!
@@ -26,7 +27,9 @@
 //! `C`→`3`, `N`→`4`, and the split-phase `s1`/`s2`→`1`/`2`.
 
 mod read;
+mod write;
 mod xml;
 
 pub(crate) use read::dir_has_cim;
 pub use read::{parse_cim_file, parse_cim_str};
+pub use write::write_cim_xml;
