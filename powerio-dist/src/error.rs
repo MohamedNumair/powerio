@@ -18,6 +18,12 @@ pub enum Error {
         message: String,
     },
 
-    #[error("unknown distribution format `{0}` (expected dss, bmopf, or pmd)")]
+    #[error("malformed {format} XML: {message}")]
+    Xml {
+        format: &'static str,
+        message: String,
+    },
+
+    #[error("unknown distribution format `{0}` (expected dss, bmopf, pmd, or cim)")]
     UnknownFormat(String),
 }

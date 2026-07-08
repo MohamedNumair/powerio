@@ -6,6 +6,20 @@ PowerModelsDistribution ENGINEERING JSON, and the draft BMOPF schema from the
 IEEE PES Task Force on Benchmarking Multiconductor OPF
 (<https://github.com/frederikgeth/bmopf-report>).
 
+Distribution CIM (IEC 61968-13 / the GridAPPS-D CIMHub profile, CIM100 CIMXML)
+reads and writes through the `cim` format name (`parse_cim_file` /
+`write_cim_xml`), so a CIM feeder converts to and from OpenDSS, PMD, and
+BMOPF like any other member of the hub. The writer emits one CIM100 document
+with deterministic mRIDs (write → read → write is byte stable, and
+single-document parses keep the byte-exact echo tier). The reader reads the per-phase equipment CIM
+distribution uses — `ConnectivityNode` buses, `ACLineSegment` with
+`ACLineSegmentPhase` and `PerLengthPhaseImpedance`/`PerLengthSequenceImpedance`,
+`EnergyConsumer`, `LinearShuntCompensator`, the switch family, `EnergySource`,
+and two-winding `PowerTransformer` — mapping `SinglePhaseKind` A/B/C/N to the
+wire-coordinate terminal names 1/2/3/4. `TransformerTank` transformers,
+three-winding banks, and wire-geometry impedance are reported, not silently
+dropped, and are tracked follow-up work.
+
 Writing back to the source format reproduces the file byte for byte; every
 cross format conversion reports each field the target cannot represent in its
 warnings. The dss reader materializes every OpenDSS class default into an

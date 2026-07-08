@@ -316,6 +316,9 @@ enum FormatArg {
     /// IEEE BMOPF JSON distribution case (read and write).
     #[value(name = "bmopf-json", alias = "bmopf")]
     BmopfJson,
+    /// Distribution CIM (IEC 61968-13 / GridAPPS-D) CIMXML case (read and write).
+    #[value(name = "cim", alias = "cim-xml", alias = "cimxml")]
+    Cim,
 }
 
 impl FormatArg {
@@ -346,7 +349,8 @@ impl FormatArg {
             | FormatArg::Pwb
             | FormatArg::Dss
             | FormatArg::PmdJson
-            | FormatArg::BmopfJson => return None,
+            | FormatArg::BmopfJson
+            | FormatArg::Cim => return None,
         })
     }
 
@@ -360,6 +364,7 @@ impl FormatArg {
             FormatArg::Dss => Some(DistTargetFormat::Dss),
             FormatArg::PmdJson => Some(DistTargetFormat::PmdJson),
             FormatArg::BmopfJson => Some(DistTargetFormat::BmopfJson),
+            FormatArg::Cim => Some(DistTargetFormat::CimXml),
             FormatArg::Matpower
             | FormatArg::PowerModelsJson
             | FormatArg::EgretJson
@@ -399,6 +404,7 @@ impl FormatArg {
             FormatArg::Dss => "dss",
             FormatArg::PmdJson => "pmd-json",
             FormatArg::BmopfJson => "bmopf-json",
+            FormatArg::Cim => "cim",
         }
     }
 }
@@ -1297,6 +1303,11 @@ fn run_convert(
     if matches!(to, FormatArg::Pwb) {
         anyhow::bail!(
             "`convert` cannot write PowerWorld .pwb binary cases; use `--to powerworld` for AUX text"
+        );
+    }
+    if matches!(to, FormatArg::Cim) {
+        anyhow::bail!(
+            "`convert` cannot write distribution CIM yet (the writer is roadmap);              read CIM with `--from cim` and write dss/pmd-json/bmopf-json"
         );
     }
     // goc3-json is read only, but the library still echoes a goc3 source to a

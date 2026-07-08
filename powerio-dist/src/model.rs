@@ -34,6 +34,9 @@ pub enum DistSourceFormat {
     Dss,
     BmopfJson,
     PmdJson,
+    /// Read from a distribution CIM (IEC 61968-13 / GridAPPS-D) CIMXML file
+    /// set. Read only; no retained source text.
+    Cim,
 }
 
 impl DistSourceFormat {
@@ -44,6 +47,7 @@ impl DistSourceFormat {
             DistSourceFormat::Dss => "dss",
             DistSourceFormat::PmdJson => "pmd-json",
             DistSourceFormat::BmopfJson => "bmopf-json",
+            DistSourceFormat::Cim => "cim",
         }
     }
 }

@@ -25,6 +25,8 @@ serde.workspace = true
 # representation its own serializer prints; the round trip rules need
 # parse(print(x)) == x exactly.
 serde_json = { workspace = true, features = ["float_roundtrip"] }
+# Distribution CIM (IEC 61968-13 / GridAPPS-D) CIMXML reader; NsReader-based.
+quick-xml.workspace = true
 schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
