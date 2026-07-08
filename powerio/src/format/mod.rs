@@ -38,6 +38,7 @@ use crate::network::{Branch, BranchRatingSet, Bus, BusId, BusType, Network, Sour
 use crate::{Error, Result};
 use routing::{Detection, JsonClass, SourceFormat as DetectedFormat, TransmissionFormat};
 
+pub mod cgmes;
 mod egret;
 mod goc3;
 mod matpower;
@@ -50,6 +51,7 @@ mod pypsa;
 pub mod routing;
 mod surge;
 
+pub use cgmes::{CgmesFiles, read_cgmes_dir, write_cgmes, write_cgmes_dir};
 pub use egret::{parse_egret_json, write_egret_json};
 #[doc(hidden)]
 pub use goc3::bridge as goc3_bridge;
@@ -252,7 +254,10 @@ pub fn target_format_from_name(name: &str) -> Option<TargetFormat> {
         TransmissionFormat::Pslf => TargetFormat::Pslf,
         TransmissionFormat::Goc3Json => TargetFormat::Goc3Json,
         TransmissionFormat::SurgeJson => TargetFormat::SurgeJson,
-        TransmissionFormat::PypsaCsv | TransmissionFormat::Pwb | TransmissionFormat::Gridfm => {
+        TransmissionFormat::PypsaCsv
+        | TransmissionFormat::Pwb
+        | TransmissionFormat::Gridfm
+        | TransmissionFormat::Cgmes => {
             return None;
         }
     })
@@ -343,6 +348,13 @@ pub fn parse_display_file(
 /// inputs, not text targets, so they have no [`TargetFormat`] arm; this is the
 /// companion alias matcher to [`target_format_from_name`] and the one place the
 /// PyPSA aliases live.
+fn is_cgmes_name(name: &str) -> bool {
+    matches!(
+        routing::transmission_format_from_name(name),
+        Some(TransmissionFormat::Cgmes)
+    )
+}
+
 fn is_pypsa_csv_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().replace(['-', '_'], "").as_str(),
@@ -393,6 +405,18 @@ pub fn parse_file(path: impl AsRef<std::path::Path>, from: Option<&str>) -> Resu
         || (from.is_none() && path.is_dir() && path.join("network.csv").is_file())
     {
         return pypsa::read_pypsa_csv_folder(path);
+    }
+    // A CGMES case is a directory of profile XMLs (EQ/TP/SSH/SV…); dispatch
+    // it before any extension logic. `from` accepts the cgmes aliases for a
+    // directory, or a single instance file read as a one-file set.
+    if from.is_some_and(is_cgmes_name)
+        || (from.is_none() && path.is_dir() && cgmes::dir_has_cgmes(path))
+    {
+        if path.is_dir() {
+            return cgmes::read_cgmes_dir(path);
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str());
+        return cgmes::read_cgmes_paths(&[path.to_path_buf()], stem);
     }
     // PowerWorld `.pwb` is binary and read only; dispatch it before the text
     // read. `from` accepts "pwb" for files with a different extension.

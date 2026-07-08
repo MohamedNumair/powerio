@@ -8,6 +8,7 @@
   - [Geographic and display data](geo-and-display.md)
   - [The study block](study-block.md)
 - [Format Fidelity](format-fidelity.md)
+- [CGMES and the CIM family](cgmes.md)
 - [Matrix Outputs](matrices.md)
 - [DC OPF Bundle](dcopf-bundle.md)
 - [C ABI Arrow Policy](capi-arrow.md)

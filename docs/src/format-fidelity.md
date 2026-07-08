@@ -182,6 +182,18 @@ code `READ.TRANSMISSION.PARSE_WARNING`. GridFM package reads use
   writer emits a canonical Surge network body for the supported power flow core;
   richer MATPOWER generator capability or ramp columns and unsupported cost
   shapes are reported in `Conversion::warnings`.
+- **CGMES** (IEC 61970-600) file sets read and write: both 2.4.15 (CIM16) and
+  3.0 (CIM100), EQ/TP/SSH/SV merged by `md:FullModel` role, bus-branch through
+  `TopologicalNode` (TP required). Per-unit lands on an assumed 100 MVA base
+  and the frequency on `BaseFrequency` else 50 Hz — both warned. Two-winding
+  transformers map with rated-voltage ratios and in-service tap steps;
+  3-winding transformers, non-linear phase tap changers, nonlinear shunts,
+  series compensators, HVDC, ZIP containers, and node-breaker sets without TP
+  are reported, not silently dropped. The writer emits an EQ/TP/SSH/SV set at
+  either release with deterministic mRIDs (write → read → write is byte
+  stable); a set is a directory, so there is no single-text echo tier. See the
+  [CGMES chapter](cgmes.md) for the version map and roadmap (boundary
+  assembly, node-breaker collapse, distribution CIM).
 - **gridfm** (read, the `gridfm` feature in `powerio-matrix`) reconstructs a
   `Network` from the gridfm-datakit Parquet dataset: lossy, but it recovers
   everything a power flow needs. That is bus types/voltages/limits, nodal load

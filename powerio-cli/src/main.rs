@@ -307,6 +307,14 @@ enum FormatArg {
     /// Read a PowerWorld .pwb binary case (read only).
     #[value(name = "pwb")]
     Pwb,
+    /// CGMES 2.4.15 (IEC 61970-600) CIMXML file set: read a directory, or
+    /// write one with `-o <dir>`.
+    #[value(name = "cgmes", alias = "cim-xml")]
+    Cgmes,
+    /// Write a CGMES 3.0 (CIM100) file set with `-o <dir>` (reading
+    /// auto-detects the version, so `--from cgmes` covers both).
+    #[value(name = "cgmes3", alias = "cgmes-3")]
+    Cgmes3,
     /// OpenDSS `.dss` distribution case (read and write).
     #[value(name = "dss", alias = "opendss")]
     Dss,
@@ -344,6 +352,8 @@ impl FormatArg {
             FormatArg::PypsaCsv
             | FormatArg::Gridfm
             | FormatArg::Pwb
+            | FormatArg::Cgmes
+            | FormatArg::Cgmes3
             | FormatArg::Dss
             | FormatArg::PmdJson
             | FormatArg::BmopfJson => return None,
@@ -374,7 +384,9 @@ impl FormatArg {
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
             | FormatArg::Gridfm
-            | FormatArg::Pwb => None,
+            | FormatArg::Pwb
+            | FormatArg::Cgmes
+            | FormatArg::Cgmes3 => None,
         }
     }
 
@@ -395,6 +407,7 @@ impl FormatArg {
             FormatArg::Goc3Json => "goc3-json",
             FormatArg::SurgeJson => "surge-json",
             FormatArg::Gridfm => "gridfm",
+            FormatArg::Cgmes | FormatArg::Cgmes3 => "cgmes",
             FormatArg::Pwb => "pwb",
             FormatArg::Dss => "dss",
             FormatArg::PmdJson => "pmd-json",
@@ -1299,6 +1312,9 @@ fn run_convert(
             "`convert` cannot write PowerWorld .pwb binary cases; use `--to powerworld` for AUX text"
         );
     }
+    if matches!(to, FormatArg::Cgmes | FormatArg::Cgmes3) {
+        return convert_to_cgmes_dir(input, output, from, to, scenario, gen_cost_options);
+    }
     // goc3-json is read only, but the library still echoes a goc3 source to a
     // goc3 target byte for byte; every other case gets its precise
     // WriteUnsupported error, so no CLI-level bail here.
@@ -1392,6 +1408,49 @@ fn run_convert(
 /// Write `input` out as a PyPSA CSV folder (a directory target, so it never
 /// returns text). gridfm input reads through the dataset reader; everything else
 /// goes through the shared transmission hub.
+/// `--to cgmes`/`--to cgmes3` write an EQ/TP/SSH/SV file set into the
+/// output directory (a set is files, not one text document).
+fn convert_to_cgmes_dir(
+    input: &std::path::Path,
+    output: Option<&std::path::Path>,
+    from: Option<FormatArg>,
+    to: FormatArg,
+    scenario: i64,
+    gen_cost_options: GenCostCliOptions<'_>,
+) -> anyhow::Result<()> {
+    let Some(out_dir) = output else {
+        anyhow::bail!("`--to {}` requires `-o <output-dir>`", to.name());
+    };
+    if out_dir.as_os_str() == "-" {
+        anyhow::bail!("`--to cgmes` writes a directory and cannot write to stdout");
+    }
+    let net = if from == Some(FormatArg::Gridfm) {
+        let read = powerio_matrix::read_gridfm_dataset(input, scenario)
+            .with_context(|| format!("reading gridfm dataset {}", input.display()))?;
+        for w in &read.warnings {
+            eprintln!("fidelity: {w}");
+        }
+        read.network
+    } else {
+        read_network(input, from)?
+    };
+    let _ = gen_cost_options.write_options()?; // costs have no CGMES slot
+    let version = if to == FormatArg::Cgmes3 {
+        powerio_matrix::format::cgmes::CgmesVersion::V3_0
+    } else {
+        powerio_matrix::format::cgmes::CgmesVersion::V2_4_15
+    };
+    let (paths, warnings) = powerio_matrix::format::cgmes::write_cgmes_dir(&net, version, out_dir)
+        .with_context(|| format!("writing CGMES set to {}", out_dir.display()))?;
+    for w in &warnings {
+        eprintln!("fidelity: {w}");
+    }
+    for path in &paths {
+        eprintln!("wrote {}", path.display());
+    }
+    Ok(())
+}
+
 fn convert_to_pypsa_folder(
     input: &std::path::Path,
     output: Option<&std::path::Path>,

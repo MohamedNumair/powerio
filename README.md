@@ -164,6 +164,7 @@ the original file type from converting to a different file type.
 | GO Challenge 3 JSON | yes | source echo only | byte exact retained source | first interval maps to the static power flow core; `.pio.json` documents retain time series as operating points |
 | Surge JSON | yes | yes | byte exact retained source | versioned JSON network body; unsupported source sections stay in retained source or warnings |
 | GridFM Parquet | yes | yes | directory output, deliberately lossy read | recovers the power flow core for conversion back to classical formats |
+| CGMES (IEC 61970-600) | yes | yes (directory output) | multi-file set, no text echo; write→read→write byte stable | 2.4.15 + 3.0, EQ/TP/SSH/SV bus-branch; assumptions and unmapped classes reported |
 
 PowerWorld `.pwd` is display data, not a network case, so it is outside this
 conversion table and uses `parse_display_file` / `parse_display_bytes`. The

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- CGMES export: `write_cgmes`/`write_cgmes_dir` (CLI `--to cgmes` / `--to
+  cgmes3` with `-o <dir>`) emit an EQ/TP/SSH/SV instance set at 2.4.15 or 3.0
+  from any parsed network — bus-branch synthesis with a minimal containment
+  hierarchy, PATL/TATL/TC current limits, SSH operating point, SV solved
+  state and island, deterministic mRIDs (imported ids ride element `uid`s)
+  and sentinel timestamps so write → read → write is byte stable. Round
+  trips are pinned against the importer at both releases, including
+  cross-version (a 3.0 case re-emitted as 2.4.15).
+- CGMES import: `cgmes` reads IEC 61970-600 CIMXML file sets (directories or
+  single files) at both 2.4.15/CIM16 and 3.0/CIM100 into the balanced
+  `Network` — EQ/TP/SSH/SV merged by header role, bus-branch through
+  `TopologicalNode`, SSH operating point with `SvPowerFlow` fallback, tap
+  steps, PATL/TATL/TC limits, island angle reference — with every assumption
+  (100 MVA base, 50 Hz default) and unmapped class reported in the parse
+  warnings. Read only; the writer, 3-winding transformers, node-breaker
+  collapse, ZIP input, and boundary assembly are documented roadmap
+  (docs/src/cgmes.md). Adds the workspace's first XML dependency
+  (quick-xml).
+
 ## 0.6.3
 
 - Arrow matrix axes (#234): the C ABI Arrow export gains a table catalog and

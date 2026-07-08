@@ -45,6 +45,7 @@ pub enum TransmissionFormat {
     Gridfm,
     Goc3Json,
     SurgeJson,
+    Cgmes,
 }
 
 impl TransmissionFormat {
@@ -65,6 +66,7 @@ impl TransmissionFormat {
             Self::Gridfm => "gridfm",
             Self::Goc3Json => "goc3-json",
             Self::SurgeJson => "surge-json",
+            Self::Cgmes => "cgmes",
         }
     }
 }
@@ -141,6 +143,7 @@ pub fn transmission_format_from_name(name: &str) -> Option<TransmissionFormat> {
         "gridfm" => Some(TransmissionFormat::Gridfm),
         "goc3" | "goc3json" | "go3" | "gochallenge3" | "c3" => Some(TransmissionFormat::Goc3Json),
         "surge" | "surgejson" => Some(TransmissionFormat::SurgeJson),
+        "cgmes" | "cgmesxml" | "cimxml" | "cim" => Some(TransmissionFormat::Cgmes),
         _ => None,
     }
 }
