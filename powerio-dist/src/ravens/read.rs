@@ -1025,20 +1025,18 @@ impl Mapper<'_> {
             let mut extras = extras_with_mrid(obj);
             let nom_u = fnum(obj, "ShuntCompensator.nomU");
             if let Some(nom_u) = nom_u {
-                // dss `kv` semantics: a wye bank's kv is line-to-line for 2-3
-                // phases (nomU is the per-phase voltage), line-to-neutral or
-                // across-the-branch otherwise.
-                let kv = if !delta && n >= 2 {
-                    nom_u * 3f64.sqrt() / 1e3
-                } else {
-                    nom_u / 1e3
-                };
+                // The upstream converter emits `nomU = cap.kV * 1000` (opendss2xml
+                // _add_LinearShuntCompensator), so nomU carries the dss `kv`
+                // directly — line-to-line for a multi-phase bank, line-to-neutral
+                // for a single-phase one — and the dss kv is nomU/1000 for every
+                // connection. bPerSection = 0.001·kvar/kV² is already the
+                // per-conductor susceptance (the √3 from the line-to-line base
+                // and the 1/phases from the per-phase split cancel), so the total
+                // reactive power is bPerSection·nomU², with no per-phase factor.
+                let kv = nom_u / 1e3;
                 extras.insert("kv".into(), kv.into());
                 extras.insert("phases".into(), (n as u64).into());
-                extras.insert(
-                    "kvar".into(),
-                    (b_phase * nom_u * nom_u * n as f64 / 1e3).into(),
-                );
+                extras.insert("kvar".into(), (b_phase * nom_u * nom_u / 1e3).into());
                 self.defaulted("capacitor", &name, "kv");
                 self.defaulted("capacitor", &name, "kvar");
             }
@@ -1104,13 +1102,18 @@ impl Mapper<'_> {
                 extras.insert("kva".into(), (rated_s / 1e3).into());
             }
 
+            // RotatingMachine.p/q are injection-negative in the CIM load
+            // convention (the writer negates on the way out, matching the
+            // upstream opendss2xml `-gen.kW`); undo it so DistGenerator holds
+            // generation as positive watts. The maxQ/minQ bounds are not
+            // negated.
             let mut machine = DistGenerator::new(
                 name,
                 at.node.clone(),
                 map.clone(),
                 configuration,
-                per_phase(f_or(obj, "RotatingMachine.p", 0.0)),
-                per_phase(f_or(obj, "RotatingMachine.q", 0.0)),
+                per_phase(-f_or(obj, "RotatingMachine.p", 0.0)),
+                per_phase(-f_or(obj, "RotatingMachine.q", 0.0)),
             );
             machine.q_max = fnum(obj, "SynchronousMachine.maxQ").map(per_phase);
             machine.q_min = fnum(obj, "SynchronousMachine.minQ").map(per_phase);
@@ -1191,8 +1194,11 @@ impl Mapper<'_> {
             if let Some(u) = rated_u {
                 extras.insert("kv".into(), (u / 1e3).into());
             }
+            // PowerElectronicsConnection.q is injection-negative (the writer
+            // negates it); undo it so the dss `kvar` setpoint is positive for
+            // reactive generation.
             if let Some(q) = fnum(obj, "PowerElectronicsConnection.q") {
-                extras.insert("kvar".into(), (q / 1e3).into());
+                extras.insert("kvar".into(), (-q / 1e3).into());
             }
             if let Some(unit) = unit {
                 for (prop, key) in [
@@ -1216,7 +1222,10 @@ impl Mapper<'_> {
                 prime_mover,
                 per_phase(rated_s),
             );
-            ibr.p_avail = fnum(obj, "PowerElectronicsConnection.p");
+            // PowerElectronicsConnection.p is injection-negative; undo it so
+            // available active power is positive. maxQ/minQ are symmetric
+            // bounds and pass through unnegated.
+            ibr.p_avail = fnum(obj, "PowerElectronicsConnection.p").map(|p| -p);
             ibr.q_max = fnum(obj, "PowerElectronicsConnection.maxQ").map(per_phase);
             ibr.q_min = fnum(obj, "PowerElectronicsConnection.minQ").map(per_phase);
             if let Some(unit) = unit {

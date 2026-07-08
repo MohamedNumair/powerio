@@ -980,20 +980,21 @@ impl Writer {
                 .get("conn")
                 .and_then(Value::as_str)
                 .is_some_and(|c| c.eq_ignore_ascii_case("delta"));
-            let nom_u = xf64(&shunt.extras, "kv").map(|kv| {
-                if !delta && n >= 2 {
-                    // Inverse of the reader's `nomU * sqrt(3) / 1e3`, pinned to
-                    // the read→write fixed point.
-                    stable_fixed(kv * 1e3 / 3f64.sqrt(), |v| {
-                        (v * 3f64.sqrt() / 1e3) * 1e3 / 3f64.sqrt()
-                    })
-                } else {
-                    stable_fixed(kv * 1e3, |v| (v / 1e3) * 1e3)
-                }
-            });
+            // nomU = cap.kV * 1000 (opendss2xml), i.e. the dss `kv` directly:
+            // line-to-line for a multi-phase bank, line-to-neutral for a
+            // single-phase one. No √3 — the reader inverts with nomU/1000.
+            let nom_u =
+                xf64(&shunt.extras, "kv").map(|kv| stable_fixed(kv * 1e3, |v| (v / 1e3) * 1e3));
             let nom_u = nom_u.or_else(|| {
-                self.base_of(&shunt.bus)
-                    .map(|base| if delta { base } else { base / 3f64.sqrt() })
+                // Fallback from the bus base when no kv rode in: a single-phase
+                // wye bank sits line-to-neutral, everything else line-to-line.
+                self.base_of(&shunt.bus).map(|base| {
+                    if !delta && n == 1 {
+                        base / 3f64.sqrt()
+                    } else {
+                        base
+                    }
+                })
             });
             if let Some(u) = nom_u {
                 let u = self.num(u, &what);
@@ -1049,10 +1050,16 @@ impl Writer {
                 &machine.name,
                 extras_mrid(&machine.extras),
             );
+            // CIM load convention (the upstream opendss2xml converter emits
+            // `-gen.kW`): a machine's active/reactive power is injection
+            // negative, so a positive generation setpoint writes as negative.
+            // The maxQ/minQ and GeneratingUnit bounds below are NOT negated —
+            // they are symmetric limits / positive operating ranges, matching
+            // upstream.
             let p: f64 = machine.p_nom.iter().sum();
             let q: f64 = machine.q_nom.iter().sum();
-            let p = self.num(p, &what);
-            let q = self.num(q, &what);
+            let p = self.num(-p, &what);
+            let q = self.num(-q, &what);
             obj.insert("RotatingMachine.p".into(), p);
             obj.insert("RotatingMachine.q".into(), q);
             if let Some(kva) = xf64(&machine.extras, "kva") {
@@ -1128,12 +1135,17 @@ impl Writer {
                 extras_mrid(&ibr.extras),
             );
             let rated_s: f64 = ibr.s_max.iter().sum();
+            // Injection-negative CIM load convention, consistent with the
+            // SynchronousMachine path and the upstream opendss2xml PV export
+            // (which writes the OpenDSS load-convention solved power, negative
+            // for generation). The maxQ/minQ and PowerElectronicsUnit min/max
+            // bounds below stay unnegated, as upstream emits them.
             if let Some(p) = ibr.p_avail {
-                let p = self.num(p, &what);
+                let p = self.num(-p, &what);
                 obj.insert("PowerElectronicsConnection.p".into(), p);
             }
             if let Some(kvar) = xf64(&ibr.extras, "kvar") {
-                let q = stable_fixed(kvar * 1e3, |v| (v / 1e3) * 1e3);
+                let q = stable_fixed(-kvar * 1e3, |v| (v / 1e3) * 1e3);
                 let q = self.num(q, &what);
                 obj.insert("PowerElectronicsConnection.q".into(), q);
             }
