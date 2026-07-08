@@ -107,6 +107,8 @@ pub enum DistributionFormat {
     SincalMulticonductor,
     Gridlabd,
     GridlabdArras,
+    /// MG-RAVENS JSON, the multiconductor (distribution) profile.
+    RavensJson,
 }
 
 impl DistributionFormat {
@@ -119,6 +121,7 @@ impl DistributionFormat {
             Self::PmdJson => "pmd-json",
             Self::BmopfJson => "bmopf-json",
             Self::CimDist => "cim-dist",
+            Self::RavensJson => "ravens-json",
         }
     }
 }
@@ -209,6 +212,9 @@ pub fn parse_distribution_format(name: &str) -> Option<DistributionFormat> {
         "pmd" | "pmdjson" | "engineering" => Some(DistributionFormat::PmdJson),
         "bmopf" | "bmopfjson" => Some(DistributionFormat::BmopfJson),
         "cimdist" => Some(DistributionFormat::CimDist),
+        "ravens" | "ravensjson" | "mgravens" | "mgravensjson" => {
+            Some(DistributionFormat::RavensJson)
+        }
         _ => None,
     }
 }

@@ -69,6 +69,9 @@ pub enum DistTargetFormat {
     CimDist,
     Gridlabd,
     GridlabdArras,
+    /// MG-RAVENS JSON, the multiconductor (distribution) profile of the
+    /// LANL CIM-derived interchange schema.
+    RavensJson,
 }
 
 /// Format specific policies for distribution network emission.
@@ -87,7 +90,8 @@ impl EmitOptions {
             DistTargetFormat::PmdJson
             | DistTargetFormat::CimDist
             | DistTargetFormat::Gridlabd
-            | DistTargetFormat::GridlabdArras => true,
+            | DistTargetFormat::GridlabdArras
+            | DistTargetFormat::RavensJson => true,
         }
     }
 }
@@ -102,6 +106,9 @@ pub fn parse_dist_target_format(name: &str) -> Option<DistTargetFormat> {
         "pmd" | "pmdjson" | "engineering" => Some(DistTargetFormat::PmdJson),
         "bmopf" | "bmopfjson" => Some(DistTargetFormat::BmopfJson),
         "cimdist" => Some(DistTargetFormat::CimDist),
+        "ravens" | "ravensjson" | "mgravens" | "mgravensjson" => {
+            Some(DistTargetFormat::RavensJson)
+        }
         _ => None,
     }
 }
@@ -127,6 +134,7 @@ impl DistTargetFormat {
             DistTargetFormat::PmdJson => "pmd-json",
             DistTargetFormat::BmopfJson => "bmopf-json",
             DistTargetFormat::CimDist => "cim-dist",
+            DistTargetFormat::RavensJson => "ravens-json",
         }
     }
 }
@@ -185,6 +193,10 @@ const NOT_BMOPF_KEYS: &[&str] = &[
     "storage",
 ];
 
+/// Top level tables only an MG-RAVENS document carries: its equipment nests
+/// under the CIM class hierarchy root and its buses are connectivity nodes.
+const RAVENS_MARKERS: &[&str] = &["PowerSystemResource", "ConnectivityNode"];
+
 /// The PMD marker. Neither BMOPF nor PowerModels carries this key, so it
 /// identifies the ENGINEERING and MATHEMATICAL models on its own; the PMD
 /// reader then rejects MATHEMATICAL with its own message.
@@ -212,6 +224,9 @@ struct TopLevel {
     dist_table: bool,
     /// A key from [`NOT_BMOPF_KEYS`].
     not_bmopf: bool,
+    /// An MG-RAVENS table: the CIM class hierarchy root or the connectivity
+    /// node table, which neither PMD nor BMOPF carries.
+    ravens: bool,
 }
 
 impl<'de> serde::Deserialize<'de> for TopLevel {
@@ -243,6 +258,7 @@ impl<'de> serde::Deserialize<'de> for TopLevel {
                     out.bus |= key == "bus";
                     out.dist_table |= DISTRIBUTION_ELEMENT_TABLES.contains(&key);
                     out.not_bmopf |= NOT_BMOPF_KEYS.contains(&key);
+                    out.ravens |= RAVENS_MARKERS.contains(&key);
                     map.next_value::<serde::de::IgnoredAny>()?;
                 }
                 Ok(out)
@@ -328,6 +344,9 @@ pub fn classify_distribution_json(text: &str) -> crate::Result<DistTargetFormat>
     // the rest), so the marker separates them, not the table set. The PMD
     // reader is what judges the marker's value, and it rejects the
     // MATHEMATICAL model with its own message.
+    if top.ravens {
+        return Ok(DistTargetFormat::RavensJson);
+    }
     if top.pmd_marker {
         return Ok(DistTargetFormat::PmdJson);
     }
@@ -495,6 +514,10 @@ fn parse_to_network(
             crate::pmd::read::parse_pmd_collecting(source_text(&buffer)?, warnings)
         }
         DistTargetFormat::CimDist => crate::cim::parse_cim_collecting(source, warnings),
+        DistTargetFormat::RavensJson => {
+            let buffer = primary(source)?;
+            crate::ravens::read::parse_ravens_collecting(source_text(&buffer)?, warnings)
+        }
     }?;
     Ok((network, format))
 }
@@ -530,6 +553,10 @@ impl DistTargetFormat {
                 )
                 | (DistTargetFormat::PmdJson, Some(DistSourceFormat::PmdJson))
                 | (DistTargetFormat::CimDist, Some(DistSourceFormat::CimDist))
+                | (
+                    DistTargetFormat::RavensJson,
+                    Some(DistSourceFormat::RavensJson)
+                )
         )
     }
 }
@@ -623,6 +650,7 @@ pub(crate) fn emit_value_text_with_options(
         }
         DistTargetFormat::PmdJson => crate::pmd::emit_pmd_json_text(net),
         DistTargetFormat::CimDist => crate::cim::emit_cim_dist_text(net),
+        DistTargetFormat::RavensJson => crate::ravens::emit_ravens_json_text(net),
     };
     if !net.component_locations().is_empty() {
         conv.push(&crate::diagnostics::codes::EMIT_DIST_COMPONENT_COORDINATES_DROPPED,

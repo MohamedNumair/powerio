@@ -8,6 +8,21 @@
   deterministic mRIDs, canonical-write idempotence, itemized fidelity warnings,
   and JSON auto-detection; multiconductor documents are refused with a pointer
   at the distribution surface.
+- Multiconductor MG-RAVENS (#27): `powerio-dist` reads and writes the
+  distribution MG-RAVENS profile (lanl-ansi/MG-RAVENS): per-phase equipment
+  (`ACLineSegmentPhase`, `EnergyConsumerPhase`, `SwitchPhase`),
+  `PerLengthPhaseImpedance` ohm/m matrices, `TransformerTank` ends with
+  catalog `TransformerEndInfo` short-circuit/no-load tests, `EnergySource`
+  Thevenin sources, `PowerElectronicsConnection` PV/battery units, and
+  `LinearShuntCompensator` banks, into the wire-coordinate
+  `MulticonductorNetwork`, so a RAVENS feeder converts to OpenDSS, PMD, and
+  BMOPF and every distribution source converts to RAVENS.
+  `DistTargetFormat::RavensJson`; CLI `--to ravens-json` and `.json`
+  auto-detection; deterministic mRIDs make write, read, write byte stable,
+  and untyped objects a parse preserved re-nest at their source paths. The
+  multiconductor sibling of the balanced MG-RAVENS support; each reader
+  refuses the other's profile and points at it. Fixture vendored from
+  MG-RAVENS (Apache-2.0).
 
 ## 0.11.7
 

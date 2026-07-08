@@ -26,6 +26,7 @@ enum Fmt {
     Dss,
     Bmopf,
     Pmd,
+    Ravens,
 }
 
 impl Fmt {
@@ -34,6 +35,7 @@ impl Fmt {
             Fmt::Dss => DistTargetFormat::Dss,
             Fmt::Bmopf => DistTargetFormat::BmopfJson,
             Fmt::Pmd => DistTargetFormat::PmdJson,
+            Fmt::Ravens => DistTargetFormat::RavensJson,
         }
     }
 
@@ -67,6 +69,7 @@ impl Fmt {
             }
             Fmt::Bmopf => parse_bmopf_str(text),
             Fmt::Pmd => parse_pmd_str(text),
+            Fmt::Ravens => helpers::parse_str(text, "ravens-json"),
         }
     }
 
@@ -75,6 +78,7 @@ impl Fmt {
             Fmt::Dss => "dss",
             Fmt::Bmopf => "BMOPF",
             Fmt::Pmd => "PMD",
+            Fmt::Ravens => "RAVENS",
         }
     }
 }
@@ -229,6 +233,7 @@ fn parse_case(case: &Case) -> helpers::Parsed {
         Fmt::Dss => parse_dss_file(&path).unwrap(),
         Fmt::Bmopf => helpers::parse_bmopf_file(&path).unwrap(),
         Fmt::Pmd => helpers::parse_pmd_file(&path).unwrap(),
+        Fmt::Ravens => helpers::parse_file(&path, Some("ravens-json")).unwrap(),
     }
 }
 
@@ -893,6 +898,47 @@ fn canonical_writers_preserve_electrical_equivalents() {
                 target.name()
             );
         }
+    }
+}
+
+/// Every fixture converts to MG-RAVENS and the canonical write is byte
+/// idempotent (write, parse, write). RAVENS is not in the strict
+/// projection grid above: its transformer-tank and per-phase restatement
+/// makes the structural comparison a separate concern (see `tests/ravens.rs`
+/// for the projection round trips), but byte idempotence is the writer's
+/// core guarantee and holds across the whole corpus.
+#[test]
+fn ravens_writer_idempotent_across_fixtures() {
+    for case in CASES {
+        let net = parse_case(case);
+        // CIM SinglePhaseKind names only four conductor identities (A/B/C/N),
+        // so a linecode with more conductors has no phase representation for
+        // the extra conductors and cannot round-trip. Skip loudly rather than
+        // silently: the writer warns on the same condition.
+        if let Some(code) = net.line_codes().iter().find(|c| c.n_conductors > 4) {
+            eprintln!(
+                "skipping {} -> RAVENS idempotence: linecode {} has {} conductors (> 4 CIM \
+                 phase identities)",
+                case.label, code.name, code.n_conductors
+            );
+            continue;
+        }
+        let first = helpers::emit_value(&net, Fmt::Ravens.target());
+        let reparsed = Fmt::Ravens.parse_emission(&first).unwrap_or_else(|e| {
+            panic!(
+                "{} -> {}: reparse failed: {e}",
+                case.label,
+                Fmt::Ravens.name()
+            )
+        });
+        let second = helpers::emit_value(&reparsed, Fmt::Ravens.target());
+        assert_eq!(
+            first.text,
+            second.text,
+            "{} -> {}: canonical output is not idempotent",
+            case.label,
+            Fmt::Ravens.name()
+        );
     }
 }
 
