@@ -133,3 +133,81 @@ fn cgmes_tokens_route_and_stay_read_only() {
     // Read only: no writer target resolves for the token.
     assert_eq!(powerio::target_format_from_name("cgmes"), None);
 }
+
+/// Writer round trips: the reader is the writer's inverse, so parse → write →
+/// parse preserves the projection, and a second write is byte identical
+/// (deterministic mRIDs and sentinel timestamps).
+#[test]
+fn writer_round_trips_both_versions() {
+    use powerio::format::cgmes::{CgmesVersion, write_cgmes_dir};
+    for (fixture, version, tag) in [
+        ("micro30", CgmesVersion::V3_0, "v30"),
+        ("micro30", CgmesVersion::V2_4_15, "v24"),
+        ("cigre_mv", CgmesVersion::V2_4_15, "cigre"),
+    ] {
+        let net = parse_file(data(fixture), None).unwrap().network;
+        let dir = std::env::temp_dir().join(format!("powerio-cgmes-wr-{tag}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (paths, _warnings) = write_cgmes_dir(&net, version, &dir).unwrap();
+        assert_eq!(paths.len(), 4, "{tag}: EQ/TP/SSH/SV");
+
+        let back = parse_file(&dir, None).unwrap().network;
+        assert_eq!(back.buses.len(), net.buses.len(), "{tag}: buses");
+        assert_eq!(back.loads.len(), net.loads.len(), "{tag}: loads");
+        assert_eq!(back.generators.len(), net.generators.len(), "{tag}: gens");
+        assert_eq!(back.branches.len(), net.branches.len(), "{tag}: branches");
+        assert_eq!(back.switches.len(), net.switches.len(), "{tag}: switches");
+        assert_eq!(back.shunts.len(), net.shunts.len(), "{tag}: shunts");
+        for (a, b) in net.buses.iter().zip(&back.buses) {
+            assert!(close(a.base_kv, b.base_kv), "{tag}: bus kv");
+            assert!(close(a.vm, b.vm), "{tag}: bus vm {} vs {}", a.vm, b.vm);
+            assert!(close(a.va, b.va), "{tag}: bus va");
+            assert_eq!(a.kind, b.kind, "{tag}: bus kind");
+        }
+        for (a, b) in net.branches.iter().zip(&back.branches) {
+            assert!(close(a.r, b.r), "{tag}: r {} vs {}", a.r, b.r);
+            assert!(close(a.x, b.x), "{tag}: x");
+            assert!(close(a.b, b.b), "{tag}: b {} vs {}", a.b, b.b);
+            assert!(
+                close(a.effective_tap(), b.effective_tap()),
+                "{tag}: tap {} vs {}",
+                a.effective_tap(),
+                b.effective_tap()
+            );
+            assert!(close(a.shift, b.shift), "{tag}: shift");
+            assert!(
+                close(a.rate_a, b.rate_a),
+                "{tag}: rate_a {} vs {}",
+                a.rate_a,
+                b.rate_a
+            );
+        }
+        for (a, b) in net.loads.iter().zip(&back.loads) {
+            assert!(close(a.p, b.p), "{tag}: load p");
+            assert!(close(a.q, b.q), "{tag}: load q");
+        }
+        for (a, b) in net.generators.iter().zip(&back.generators) {
+            assert!(close(a.pg, b.pg), "{tag}: pg");
+            assert!(close(a.qg, b.qg), "{tag}: qg");
+            assert!(close(a.vg, b.vg), "{tag}: vg {} vs {}", a.vg, b.vg);
+        }
+        for (a, b) in net.shunts.iter().zip(&back.shunts) {
+            assert!(close(a.b, b.b), "{tag}: shunt b");
+        }
+
+        // Byte idempotence: rewriting the reparse reproduces the files.
+        let dir2 = std::env::temp_dir().join(format!("powerio-cgmes-wr2-{tag}"));
+        let _ = std::fs::remove_dir_all(&dir2);
+        let (paths2, _) = write_cgmes_dir(&back, version, &dir2).unwrap();
+        for (p1, p2) in paths.iter().zip(&paths2) {
+            assert_eq!(
+                std::fs::read_to_string(p1).unwrap(),
+                std::fs::read_to_string(p2).unwrap(),
+                "{tag}: canonical write is not idempotent ({})",
+                p1.display()
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
+    }
+}

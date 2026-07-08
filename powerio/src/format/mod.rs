@@ -51,7 +51,7 @@ mod pypsa;
 pub mod routing;
 mod surge;
 
-pub use cgmes::read_cgmes_dir;
+pub use cgmes::{CgmesFiles, read_cgmes_dir, write_cgmes, write_cgmes_dir};
 pub use egret::{parse_egret_json, write_egret_json};
 #[doc(hidden)]
 pub use goc3::bridge as goc3_bridge;

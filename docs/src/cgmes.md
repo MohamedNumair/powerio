@@ -5,8 +5,12 @@ profile stack over the IEC Common Information Model, and the format European
 TSOs exchange grid models in. powerio reads CGMES file sets into the balanced
 [`Network`] through the transmission hub (`powerio convert <dir> --from cgmes
 --to matpower`, `parse_file` on a directory, `read_cgmes_dir` in Rust). This
-chapter records the version landscape the importer is built against, exactly
-what it maps today, and the roadmap.
+chapter records the version landscape the reader and writer are built
+against, exactly what they map today, and the roadmap. The writer
+(`write_cgmes`/`write_cgmes_dir`; CLI `--to cgmes` / `--to cgmes3` with
+`-o <dir>`) emits an EQ/TP/SSH/SV set at either release with deterministic
+mRIDs — imported ids pass through element `uid`s — so write → read → write is
+byte stable, and any hub format converts into CGMES.
 
 ## Version map
 
@@ -64,8 +68,9 @@ mask.
 - **Stated assumptions.** CGMES carries no system MVA base: per-unit lands on
   100 MVA (warned on every parse). `BaseFrequency` is honored when present,
   else 50 Hz (warned). No source text is retained — a multi-file set has no
-  single byte-exact echo, so `cgmes` is read-only (like `.pwb` and gridfm)
-  and every unconsumed class is counted into the parse warnings.
+  single byte-exact echo (a set is a directory, so `cgmes` stays outside the
+  single-text `TargetFormat`), and every unconsumed class is counted into the
+  parse warnings.
 
 Fixtures: a hand-computed CGMES 3.0 micro set plus the CIGRE MV benchmark and
 a node-breaker switching sample vendored from cimpy (Apache-2.0) — see
@@ -76,23 +81,19 @@ sets that are not license-clean to vendor.
 
 Tracked follow-up work, roughly in dependency order:
 
-1. **CGMES writer** (EQ/TP/SSH/SV, version-selectable): bus-branch synthesis
-   with deterministic mRIDs (imported ids ride element `uid`s already), the
-   `md:FullModel` dependency headers, and a canonical-write idempotence gate
-   like the other formats.
-2. **Three-winding transformers** → the typed `Transformer3W` record
+1. **Three-winding transformers** → the typed `Transformer3W` record
    (per-end star impedances map directly).
-3. **Node-breaker collapse** when a set has no TP part, and ZIP container
+2. **Node-breaker collapse** when a set has no TP part, and ZIP container
    input.
-4. **Boundary-set aware assembly** (multi-IGM merging on `eu:BoundaryPoint` /
+3. **Boundary-set aware assembly** (multi-IGM merging on `eu:BoundaryPoint` /
    `entsoe:ConnectivityNode.boundaryPoint`) and difference models (61970-552
    `dm:`).
-5. **DL/GL → typed geometry** (`Location`/`GeoMeta` landed in the model for
+4. **DL/GL → typed geometry** (`Location`/`GeoMeta` landed in the model for
    exactly this) and dynamics (DY) retention.
-6. **Distribution CIM** (IEC 61968-13 / the GridAPPS-D CIM100 profile) in
+5. **Distribution CIM** (IEC 61968-13 / the GridAPPS-D CIM100 profile) in
    `powerio-dist`, reusing the CIMXML layer — the multiconductor sibling of
    this importer, with CIMHub's IEEE feeders as fixtures.
-7. **Schema-aware validation tooling** against the ENTSO-E Application
+6. **Schema-aware validation tooling** against the ENTSO-E Application
    Profiles Library artifacts (Apache-2.0 RDFS/SHACL).
 
 [`Network`]: https://docs.rs/powerio/latest/powerio/struct.Network.html

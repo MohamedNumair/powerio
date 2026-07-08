@@ -14,10 +14,12 @@
 //! ENTSO-E extensions under `entsoe:`) and CGMES 3.0 (CIM100,
 //! `http://iec.ch/TC57/CIM100#`, `eu:` extensions) parse; the version is
 //! detected from the `cim` namespace, tolerating vendor variants of the CIM16
-//! URI year. Import only: the CGMES writer is tracked follow-up work, so
-//! `cgmes` has no `TargetFormat` (the read-only precedent of `.pwb` and
-//! gridfm), and no source text is retained (a multi-file set has no single
-//! byte-exact echo).
+//! URI year. The writer ([`write_cgmes`]/[`write_cgmes_dir`]) emits the same
+//! four-profile set at either release with deterministic mRIDs (imported ids
+//! pass through element `uid`s), so write → read → write is byte stable. A
+//! set is a directory of files rather than one text document, so `cgmes`
+//! stays outside `TargetFormat` (the PyPSA-folder precedent) and no source
+//! text is retained (no single byte-exact echo).
 //!
 //! CGMES has no system MVA base (values are MW/MVAr/kV/ohm); the reader
 //! normalizes onto 100 MVA. The base frequency comes from the EQ
@@ -25,10 +27,12 @@
 //! reported as an assumption.
 
 mod read;
+mod write;
 mod xml;
 
 pub use read::read_cgmes_dir;
 pub(crate) use read::{dir_has_cgmes, read_cgmes_paths};
+pub use write::{CgmesFiles, write_cgmes, write_cgmes_dir};
 
 /// The CGMES release family a file set declares, from its `cim` namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
