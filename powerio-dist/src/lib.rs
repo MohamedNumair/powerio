@@ -52,6 +52,7 @@ pub mod geo;
 pub mod graph;
 pub mod model;
 pub mod pmd;
+pub mod ravens;
 
 pub use bmopf::{
     BmopfWriteOptions, parse_bmopf_file, parse_bmopf_str, write_bmopf_json,
@@ -81,3 +82,4 @@ pub use model::{
     VoltWattControl, VoltageSource, Winding, WindingConn,
 };
 pub use pmd::{parse_pmd_file, parse_pmd_str, write_pmd_json};
+pub use ravens::{parse_ravens_file, parse_ravens_str, write_ravens_json};

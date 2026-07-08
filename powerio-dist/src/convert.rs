@@ -37,6 +37,7 @@ pub enum DistTargetFormat {
     Dss,
     BmopfJson,
     PmdJson,
+    RavensJson,
 }
 
 /// Resolves common names and file extensions to a target format.
@@ -46,6 +47,7 @@ pub fn dist_target_from_name(name: &str) -> Option<DistTargetFormat> {
         "dss" | "opendss" => Some(DistTargetFormat::Dss),
         "pmd" | "pmdjson" | "engineering" => Some(DistTargetFormat::PmdJson),
         "bmopf" | "bmopfjson" => Some(DistTargetFormat::BmopfJson),
+        "ravens" | "ravensjson" | "mgravens" => Some(DistTargetFormat::RavensJson),
         _ => None,
     }
 }
@@ -61,13 +63,14 @@ impl std::str::FromStr for DistTargetFormat {
 }
 
 impl DistTargetFormat {
-    /// The canonical format name (`dss`, `pmd-json`, `bmopf-json`), accepted
-    /// back by [`dist_target_from_name`].
+    /// The canonical format name (`dss`, `pmd-json`, `bmopf-json`,
+    /// `ravens-json`), accepted back by [`dist_target_from_name`].
     pub fn name(self) -> &'static str {
         match self {
             DistTargetFormat::Dss => "dss",
             DistTargetFormat::PmdJson => "pmd-json",
             DistTargetFormat::BmopfJson => "bmopf-json",
+            DistTargetFormat::RavensJson => "ravens-json",
         }
     }
 }
@@ -94,10 +97,28 @@ fn has_top_level_key(text: &str, key: &str) -> bool {
     })
 }
 
-/// Distribution parser policy for `.json`: PMD carries `data_model`; otherwise
-/// it is routed to BMOPF so the BMOPF reader can give the parse error or warning.
+/// True when the JSON text carries the MG-RAVENS document markers: the
+/// name-keyed `ConnectivityNode`/`PowerSystemResource` tables, or a
+/// `Versions` record with a `Ravens.cimObjectType` discriminator anywhere in
+/// it. The discriminator is what separates a RAVENS document from PMD/BMOPF,
+/// which never carry it.
+fn is_ravens_json(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text).is_ok_and(|value| {
+        value.as_object().is_some_and(|shape| {
+            (shape.contains_key("ConnectivityNode") || shape.contains_key("PowerSystemResource"))
+                && text.contains("Ravens.cimObjectType")
+        })
+    })
+}
+
+/// Distribution parser policy for `.json`: RAVENS carries the CIM
+/// class-hierarchy tables and `Ravens.cimObjectType`; PMD carries
+/// `data_model`; otherwise it is routed to BMOPF so the BMOPF reader can give
+/// the parse error or warning.
 fn infer_distribution_json_format(text: &str) -> DistTargetFormat {
-    if has_top_level_key(text, "data_model") {
+    if is_ravens_json(text) {
+        DistTargetFormat::RavensJson
+    } else if has_top_level_key(text, "data_model") {
         DistTargetFormat::PmdJson
     } else {
         DistTargetFormat::BmopfJson
@@ -110,6 +131,7 @@ pub fn parse_str(text: &str, format: &str) -> crate::Result<DistNetwork> {
         DistTargetFormat::Dss => Ok(crate::dss::parse_dss_str(text)),
         DistTargetFormat::BmopfJson => crate::bmopf::parse_bmopf_str(text),
         DistTargetFormat::PmdJson => crate::pmd::parse_pmd_str(text),
+        DistTargetFormat::RavensJson => crate::ravens::parse_ravens_str(text),
     }
 }
 
@@ -134,10 +156,10 @@ pub fn parse_file(
             "dss" => DistTargetFormat::Dss,
             "json" => {
                 let text = read(path)?;
-                return if infer_distribution_json_format(&text) == DistTargetFormat::PmdJson {
-                    crate::pmd::parse_pmd_str(&text)
-                } else {
-                    crate::bmopf::parse_bmopf_str(&text)
+                return match infer_distribution_json_format(&text) {
+                    DistTargetFormat::PmdJson => crate::pmd::parse_pmd_str(&text),
+                    DistTargetFormat::RavensJson => crate::ravens::parse_ravens_str(&text),
+                    _ => crate::bmopf::parse_bmopf_str(&text),
                 };
             }
             other => return Err(crate::Error::UnknownFormat(other.to_string())),
@@ -147,6 +169,7 @@ pub fn parse_file(
         DistTargetFormat::Dss => crate::dss::parse_dss_file(path),
         DistTargetFormat::BmopfJson => crate::bmopf::parse_bmopf_str(&read(path)?),
         DistTargetFormat::PmdJson => crate::pmd::parse_pmd_str(&read(path)?),
+        DistTargetFormat::RavensJson => crate::ravens::parse_ravens_str(&read(path)?),
     }
 }
 
@@ -189,6 +212,7 @@ impl DistTargetFormat {
             (DistTargetFormat::Dss, DistSourceFormat::Dss)
                 | (DistTargetFormat::BmopfJson, DistSourceFormat::BmopfJson)
                 | (DistTargetFormat::PmdJson, DistSourceFormat::PmdJson)
+                | (DistTargetFormat::RavensJson, DistSourceFormat::RavensJson)
         )
     }
 }
@@ -200,6 +224,7 @@ impl DistNetwork {
             DistTargetFormat::Dss => crate::dss::write_dss(self),
             DistTargetFormat::BmopfJson => crate::bmopf::write_bmopf_json(self),
             DistTargetFormat::PmdJson => crate::pmd::write_pmd_json(self),
+            DistTargetFormat::RavensJson => crate::ravens::write_ravens_json(self),
         }
     }
 

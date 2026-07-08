@@ -2,9 +2,18 @@
 
 `powerio-dist` parses multiconductor distribution network cases into a typed
 model in wire coordinates and converts between OpenDSS `.dss`,
-PowerModelsDistribution ENGINEERING JSON, and the draft BMOPF schema from the
+PowerModelsDistribution ENGINEERING JSON, the draft BMOPF schema from the
 IEEE PES Task Force on Benchmarking Multiconductor OPF
-(<https://github.com/frederikgeth/bmopf-report>).
+(<https://github.com/frederikgeth/bmopf-report>), and the MG-RAVENS
+CIM-derived JSON schema from LANL/Triad
+(<https://github.com/lanl-ansi/MG-RAVENS>). MG-RAVENS nests per-phase
+equipment (`ACLineSegmentPhase`, `EnergyConsumerPhase`,
+`PerLengthPhaseImpedance` matrices, `TransformerTank` ends with catalog
+`TransformerEndInfo` records) under the CIM class hierarchy; the reader lands
+it in the same wire-coordinate model, so a RAVENS feeder converts to OpenDSS,
+PMD, and BMOPF and back. The multiconductor profile is the sibling of the
+balanced (transmission) MG-RAVENS support in the `powerio` crate; each reader
+refuses the other's profile and points at it.
 
 Writing back to the source format reproduces the file byte for byte; every
 cross format conversion reports each field the target cannot represent in its
@@ -23,7 +32,8 @@ for w in &pmd.warnings {
 ```
 
 The same surface is available from the `powerio` CLI
-(`powerio convert feeder.dss --to pmd-json`), the Python package
+(`powerio convert feeder.dss --to pmd-json`, `--to ravens-json`,
+`convert feeder.ravens.json --to dss`), the Python package
 (`powerio.dist`), and the C ABI (`pio_dist_*`, behind the `dist` cargo
 feature of `powerio-capi`).
 

@@ -75,10 +75,24 @@ commit 87dc18b0) via the committed oracle:
 way. PMD's `parse_file` ran with `kron_reduce=false`; `print_file` wrote the
 dict. Regenerate with the same command when bumping the PMD version.
 
+## ravens/
+
+MG-RAVENS multiconductor JSON example from the schema project, vendored
+unchanged as the reader/writer round-trip fixture.
+
+- Source: <https://github.com/lanl-ansi/MG-RAVENS>, commit
+  `094ad1163cb111df676884635aa03faa0538b688`, file
+  `examples/case3_balanced.json` (a three-bus, two-line,
+  three-single-phase-load feeder with a Thevenin `EnergySource`).
+- `case3_balanced.json` sha256
+  `4a66f801aa2506562b8611215314d36d000055d4ac9a1bec7ee84693e0b9e6e7`
+
 ## Licensing
 
 Each directory carries its own license file next to the data it covers:
 `bmopf/License.md`, `opendss/License.txt` (the BSD 3 clause notice retained
-from the upstream distribution), `micro/License.md` (CC BY 4.0), and
-`pmd/License.md` (derivatives carry their sources' licenses). The repository
-code license does not apply to vendored data.
+from the upstream distribution), `micro/License.md` (CC BY 4.0),
+`pmd/License.md` (derivatives carry their sources' licenses), and
+`ravens/License.md` (the MG-RAVENS Apache-2.0 notice, Copyright 2020 Triad
+National Security, LLC). The repository code license does not apply to
+vendored data.

@@ -316,6 +316,9 @@ enum FormatArg {
     /// IEEE BMOPF JSON distribution case (read and write).
     #[value(name = "bmopf-json", alias = "bmopf")]
     BmopfJson,
+    /// MG-RAVENS multiconductor JSON distribution case (read and write).
+    #[value(name = "ravens-json", alias = "ravens", alias = "mgravens")]
+    RavensJson,
 }
 
 impl FormatArg {
@@ -346,7 +349,8 @@ impl FormatArg {
             | FormatArg::Pwb
             | FormatArg::Dss
             | FormatArg::PmdJson
-            | FormatArg::BmopfJson => return None,
+            | FormatArg::BmopfJson
+            | FormatArg::RavensJson => return None,
         })
     }
 
@@ -360,6 +364,7 @@ impl FormatArg {
             FormatArg::Dss => Some(DistTargetFormat::Dss),
             FormatArg::PmdJson => Some(DistTargetFormat::PmdJson),
             FormatArg::BmopfJson => Some(DistTargetFormat::BmopfJson),
+            FormatArg::RavensJson => Some(DistTargetFormat::RavensJson),
             FormatArg::Matpower
             | FormatArg::PowerModelsJson
             | FormatArg::EgretJson
@@ -399,6 +404,7 @@ impl FormatArg {
             FormatArg::Dss => "dss",
             FormatArg::PmdJson => "pmd-json",
             FormatArg::BmopfJson => "bmopf-json",
+            FormatArg::RavensJson => "ravens-json",
         }
     }
 }

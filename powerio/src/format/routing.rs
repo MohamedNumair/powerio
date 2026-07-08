@@ -75,6 +75,7 @@ pub enum DistributionFormat {
     Dss,
     PmdJson,
     BmopfJson,
+    RavensJson,
 }
 
 impl DistributionFormat {
@@ -83,6 +84,7 @@ impl DistributionFormat {
             Self::Dss => "dss",
             Self::PmdJson => "pmd-json",
             Self::BmopfJson => "bmopf-json",
+            Self::RavensJson => "ravens-json",
         }
     }
 }
@@ -151,6 +153,7 @@ pub fn distribution_format_from_name(name: &str) -> Option<DistributionFormat> {
         "dss" | "opendss" => Some(DistributionFormat::Dss),
         "pmd" | "pmdjson" | "engineering" => Some(DistributionFormat::PmdJson),
         "bmopf" | "bmopfjson" => Some(DistributionFormat::BmopfJson),
+        "ravens" | "ravensjson" | "mgravens" => Some(DistributionFormat::RavensJson),
         _ => None,
     }
 }
@@ -249,6 +252,13 @@ impl JsonShape {
         let transmission =
             is_pandapower || is_egret || is_goc3 || is_surge || is_powerio || is_power_models;
 
+        // MG-RAVENS documents nest their equipment under the CIM class
+        // hierarchy (`PowerSystemResource`) and carry a `Versions` record;
+        // neither BMOPF nor PMD uses those keys, so RAVENS is unambiguous
+        // even though it is a distribution JSON.
+        let is_ravens = self.has("PowerSystemResource")
+            || (self.has("ConnectivityNode") && self.has("Versions"));
+
         let is_pmd = self.has("data_model");
         let strong_bmopf = self.has("line")
             || self.has("linecode")
@@ -259,7 +269,11 @@ impl JsonShape {
             || self.has("generator")
             || self.has("shunt")
             || self.has("switch");
-        let distribution = is_pmd || strong_bmopf || (weak_bmopf && !transmission);
+        let distribution = is_ravens || is_pmd || strong_bmopf || (weak_bmopf && !transmission);
+
+        if is_ravens && !transmission {
+            return Detection::Known(SourceFormat::Distribution(DistributionFormat::RavensJson));
+        }
 
         match (transmission, distribution) {
             (true, true) => Detection::Ambiguous,
@@ -341,6 +355,30 @@ mod tests {
                 DistributionFormat::BmopfJson
             )))
         );
+    }
+
+    #[test]
+    fn classifies_multiconductor_ravens_json() {
+        // Nested CIM hierarchy plus a Versions record: distribution RAVENS.
+        assert_eq!(
+            classify_json_text(
+                r#"{"Versions":{},"ConnectivityNode":{},"PowerSystemResource":{"Equipment":{}}}"#
+            ),
+            JsonClass::Case(Detection::Known(SourceFormat::Distribution(
+                DistributionFormat::RavensJson
+            )))
+        );
+    }
+
+    #[test]
+    fn resolves_ravens_aliases() {
+        for alias in ["ravens", "ravens-json", "mgravens"] {
+            assert_eq!(
+                super::distribution_format_from_name(alias),
+                Some(DistributionFormat::RavensJson),
+                "{alias}"
+            );
+        }
     }
 
     #[test]
