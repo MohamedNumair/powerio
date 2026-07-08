@@ -229,6 +229,115 @@ fn ravens_writer_round_trips() {
     );
 }
 
+/// Machines and inverter-based resources carry the CIM injection-negative
+/// sign in the document (the upstream `opendss2xml` writes `-gen.kW`), so a
+/// positive generation setpoint emits as negative and reads back positive.
+#[test]
+fn generation_uses_injection_negative_sign() {
+    let dss = "clear\nNew Circuit.c basekv=12.47 bus1=src\n\
+               New Generator.g1 bus1=b2 phases=3 kv=12.47 kw=500 kvar=100 conn=wye\n\
+               New Line.l1 bus1=src bus2=b2 length=1 r1=0.1 x1=0.1\n";
+    let net = parse_str(dss, "dss").unwrap();
+    let p_gen: f64 = net.generators[0].p_nom.iter().sum();
+    assert!(p_gen > 0.0, "dss generation is positive: {p_gen}");
+
+    let doc: serde_json::Value =
+        serde_json::from_str(&net.to_canonical_format(DistTargetFormat::RavensJson).text).unwrap();
+    let mut ps = Vec::new();
+    collect_key(&doc, "RotatingMachine.p", &mut ps);
+    assert_eq!(ps.len(), 1);
+    assert!(
+        ps[0] < 0.0,
+        "RotatingMachine.p is injection-negative: {}",
+        ps[0]
+    );
+
+    let back =
+        parse_ravens_str(&net.to_canonical_format(DistTargetFormat::RavensJson).text).unwrap();
+    let p_back: f64 = back.generators[0].p_nom.iter().sum();
+    assert!(
+        close(p_back, p_gen),
+        "generation round-trips positive: {p_back} vs {p_gen}"
+    );
+
+    // A PV inverter takes the same convention and round-trips.
+    let pv = parse_file(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/data/dist/micro/ibr_pv_control.dss"),
+        None,
+    )
+    .unwrap();
+    if let Some(avail) = pv.ibrs.first().and_then(|i| i.p_avail) {
+        let doc: serde_json::Value =
+            serde_json::from_str(&pv.to_canonical_format(DistTargetFormat::RavensJson).text)
+                .unwrap();
+        let mut pe = Vec::new();
+        collect_key(&doc, "PowerElectronicsConnection.p", &mut pe);
+        assert!(
+            pe.iter().all(|&p| p <= 0.0),
+            "PV p is injection-negative: {pe:?}"
+        );
+        let back =
+            parse_ravens_str(&pv.to_canonical_format(DistTargetFormat::RavensJson).text).unwrap();
+        assert!(
+            close(back.ibrs[0].p_avail.unwrap(), avail),
+            "PV p_avail round-trips positive"
+        );
+    }
+}
+
+/// A multi-phase wye capacitor's `ShuntCompensator.nomU` is the line-to-line
+/// voltage (`cap.kV * 1000`, the upstream opendss2xml convention), not the
+/// per-phase value, and the per-section susceptance carries the total reactive
+/// power without a spurious per-phase factor.
+#[test]
+fn shunt_nom_voltage_is_line_to_line() {
+    let dss = "clear\nNew Circuit.c basekv=4.16 bus1=src\n\
+               New Line.l1 bus1=src bus2=b2 length=1 r1=0.1 x1=0.1\n\
+               New Capacitor.c1 bus1=b2 phases=3 kv=4.16 kvar=300 conn=wye\n";
+    let net = parse_str(dss, "dss").unwrap();
+    let doc: serde_json::Value =
+        serde_json::from_str(&net.to_canonical_format(DistTargetFormat::RavensJson).text).unwrap();
+    let mut nom = Vec::new();
+    collect_key(&doc, "ShuntCompensator.nomU", &mut nom);
+    assert_eq!(nom.len(), 1);
+    assert!(
+        close(nom[0], 4160.0),
+        "nomU is line-to-line 4160, not per-phase 2402: {}",
+        nom[0]
+    );
+    // The total reactive power recovers on reparse (no ×phases inflation).
+    let back =
+        parse_ravens_str(&net.to_canonical_format(DistTargetFormat::RavensJson).text).unwrap();
+    let b: f64 = back.shunts[0].b[0][0];
+    let q_total = b * 4160.0 * 4160.0; // vars
+    assert!(
+        close(q_total, 300_000.0),
+        "recovered total kvar ≈ 300: {}",
+        q_total / 1000.0
+    );
+}
+
+/// Recursively collect every value stored under `key` anywhere in the JSON.
+fn collect_key(v: &serde_json::Value, key: &str, out: &mut Vec<f64>) {
+    match v {
+        serde_json::Value::Object(m) => {
+            if let Some(x) = m.get(key).and_then(serde_json::Value::as_f64) {
+                out.push(x);
+            }
+            for c in m.values() {
+                collect_key(c, key, out);
+            }
+        }
+        serde_json::Value::Array(a) => {
+            for c in a {
+                collect_key(c, key, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// dss → RAVENS: any distribution source now writes RAVENS, including a
 /// transformer, which round-trips through the catalog `TransformerEndInfo`
 /// records.
