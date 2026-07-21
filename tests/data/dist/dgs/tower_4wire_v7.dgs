@@ -1,0 +1,36 @@
+********************************************************************************
+* Hand-authored DGS 7.0 fixture, original to this repository: a coupled tower
+* section carrying an explicit ASYMMETRIC 4-conductor (3 phases + neutral)
+* natural-coordinate matrix in denormalized `R_c1:*` column form. The matrix
+* must be preserved verbatim (no symmetrization, no Kron reduction).
+********************************************************************************
+
+$$General;FID(a:40);Descr(a:40);Val(a:40)
+1;Version;7.0
+
+
+$$ElmNet;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);frnom(r)
+Grid;C;FourWire;;50
+
+
+$$ElmTerm;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);iUsage(i);outserv(i);uknom(r)
+A;C;A;Grid;0;0;0.4
+B;C;B;Grid;0;0;0.4
+
+
+$$ElmXnet;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);bustp(a:2);usetp(r)
+Ext;C;Ext;Grid;SL;1
+
+
+$$TypTow;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);R_c1:SIZEROW(i);R_c1:SIZECOL(i);R_c1:0:0(r);R_c1:0:1(r);R_c1:0:2(r);R_c1:0:3(r);R_c1:1:0(r);R_c1:1:1(r);R_c1:1:2(r);R_c1:1:3(r);R_c1:2:0(r);R_c1:2:1(r);R_c1:2:2(r);R_c1:2:3(r);R_c1:3:0(r);R_c1:3:1(r);R_c1:3:2(r);R_c1:3:3(r);X_c1:SIZEROW(i);X_c1:SIZECOL(i);X_c1:0:0(r);X_c1:0:1(r);X_c1:0:2(r);X_c1:0:3(r);X_c1:1:0(r);X_c1:1:1(r);X_c1:1:2(r);X_c1:1:3(r);X_c1:2:0(r);X_c1:2:1(r);X_c1:2:2(r);X_c1:2:3(r);X_c1:3:0(r);X_c1:3:1(r);X_c1:3:2(r);X_c1:3:3(r)
+Tow1;C;Tower 4w;Types;4;4;0.11;0.031;0.032;0.041;0.031;0.12;0.033;0.042;0.032;0.033;0.13;0.043;0.041;0.042;0.043;0.25;4;4;0.21;0.09;0.07;0.06;0.09;0.22;0.08;0.061;0.07;0.08;0.23;0.062;0.06;0.061;0.062;0.4
+
+
+$$ElmLne;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);dline(r);fline(r);nlnum(i);outserv(i)
+LnT;C;LnT;Grid;Tow1;1;1;1;0
+
+
+$$StaCubic;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);obj_bus(i);obj_id(p)
+CubX;C;CubX;A;0;Ext
+Cub0;C;Cub0;A;0;LnT
+Cub1;C;Cub1;B;1;LnT

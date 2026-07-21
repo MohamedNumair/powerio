@@ -30,7 +30,9 @@ graph views for any downstream solver. Feeds the GridFM ML pipeline.
 `IndexedNetwork` is the dense indexed analysis view derived from it.
 
 Formats. MATPOWER `.m`, PowerModels JSON, PSS/E `.raw` (v33/34/35),
-PowerWorld `.aux`, PSLF `.epc`, DIgSILENT DGS `.dgs` (v5/6/7 read, v7 write),
+PowerWorld `.aux`, PSLF `.epc`, DIgSILENT DGS `.dgs` (v5/6/7 read, v7 write;
+also reads into the powerio-dist multiconductor model, making DGS the one
+dual-family input — the target format picks the reader),
 egret JSON, pandapower JSON, PyPSA CSV folders, Surge JSON, and PowerIO JSON all
 read and write. GO Challenge 3 JSON is a read only input with byte exact same
 source echo; PowerWorld `.pwb` is a read only binary input with no writer.

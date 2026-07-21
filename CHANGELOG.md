@@ -12,6 +12,19 @@
   to the ASCII export path. Registered across the CLI (`--to dgs`, aliases
   `digsilent`/`powerfactory`), Python, and C ABI format surfaces, with no ABI or
   version bump.
+- DGS distribution path (#150): a second, multiconductor DGS reader in
+  `powerio-dist` makes DGS the one dual-family input — the same `.dgs` file
+  converts to MATPOWER through the balanced reader or to OpenDSS, PMD JSON, and
+  BMOPF JSON through the wire-coordinate model, selected by the target. Line
+  impedance is tiered: explicit natural-coordinate conductor matrices
+  (`R_c1`/`X_c1`/`B_c1`, denormalized columns or the DGS 7.0 `$$Matrix` table)
+  are kept verbatim, asymmetry and 4th-wire neutral included; symmetrical
+  `TypLne` sequence data expands to a transposed 3x3 by Fortescue with the
+  assumption surfaced as a note; bare `TypTow`/`TypGeo`/`TypCabsys` geometry
+  without exported matrices is skipped with re-export guidance rather than
+  fabricated. Single-phase LV loads land on the phase their cubicle pins
+  (`StaCubic.cPhInfo`), transformer vector groups map to wye/delta windings,
+  and the external grid becomes the single voltage source BMOPF requires.
 
 ## 0.6.3
 

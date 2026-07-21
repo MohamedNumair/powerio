@@ -36,7 +36,7 @@ Supported formats:
 - [PSS/E](https://www.siemens.com/global/en/products/energy/grid-software/planning/pss-software/pss-e.html) `.raw` revisions 33, 34, and 35
 - [PowerWorld](https://www.powerworld.com/WebHelp/Content/MainDocumentation_HTML/Case_Formats.htm) `.aux`, plus read only `.pwb` binary cases; `.pwd` display files parse through the separate display API. Behavior and limits are in the [format fidelity guide](https://powerio.dev/guide/format-fidelity.html).
 - GE PSLF `.epc` power flow cases
-- [DIgSILENT PowerFactory](https://www.digsilent.de/en/powerfactory.html) DGS ASCII `.dgs` cases (versions 5, 6, and 7)
+- [DIgSILENT PowerFactory](https://www.digsilent.de/en/powerfactory.html) DGS ASCII `.dgs` cases (versions 5, 6, and 7) — the one dual-family input: the target picks the balanced transmission reader or the multiconductor distribution reader (`--to opendss|pmd|bmopf`)
 - [PowerModels.jl](https://github.com/lanl-ansi/PowerModels.jl) network data JSON
 - [egret](https://pypi.org/project/gridx-egret/) `ModelData` JSON
 - [pandapower](https://www.pandapower.org/) `pandapowerNet` JSON

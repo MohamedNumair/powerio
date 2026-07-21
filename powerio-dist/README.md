@@ -4,7 +4,15 @@
 model in wire coordinates and converts between OpenDSS `.dss`,
 PowerModelsDistribution ENGINEERING JSON, and the draft BMOPF schema from the
 IEEE PES Task Force on Benchmarking Multiconductor OPF
-(<https://github.com/frederikgeth/bmopf-report>).
+(<https://github.com/frederikgeth/bmopf-report>). DIgSILENT PowerFactory DGS
+ASCII exports (versions 5.0-7.0) read into the same model as a source: line
+types with explicit natural-coordinate conductor matrices (`R_c1`/`X_c1`/
+`B_c1`, denormalized columns or the DGS 7.0 `$$Matrix` table) keep them
+verbatim — asymmetry and a neutral conductor included — symmetrical `TypLne`
+sequence data expands to a transposed 3x3 by Fortescue, single-phase loads land
+on the phase their cubicle pins (`cPhInfo`), and the external grid becomes the
+voltage source. DGS is read only here; the balanced positive-sequence DGS
+reader and writer live in the `powerio` crate.
 
 Writing back to the source format reproduces the file byte for byte; every
 cross format conversion reports each field the target cannot represent in its

@@ -1,0 +1,36 @@
+********************************************************************************
+* Hand-authored DGS 7.0 fixture, original to this repository: a line whose
+* type is a bare TypGeo geometry (conductor coordinates only, no computed
+* R_c1/X_c1/B_c1 matrices). The reader must not fabricate an impedance; it
+* skips the line with re-export guidance.
+********************************************************************************
+
+$$General;FID(a:40);Descr(a:40);Val(a:40)
+1;Version;7.0
+
+
+$$ElmNet;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);frnom(r)
+Grid;C;GeomOnly;;50
+
+
+$$ElmTerm;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);iUsage(i);outserv(i);uknom(r)
+A;C;A;Grid;0;0;20
+B;C;B;Grid;0;0;20
+
+
+$$ElmXnet;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);bustp(a:2);usetp(r)
+Ext;C;Ext;Grid;SL;1
+
+
+$$TypGeo;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);gearth(r)
+Geo1;C;Geometry;Types;100
+
+
+$$ElmLne;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);typ_id(p);dline(r);fline(r);nlnum(i);outserv(i)
+LnG;C;LnG;Grid;Geo1;1;1;1;0
+
+
+$$StaCubic;FID(a:40);OP(a:1);loc_name(a:40);fold_id(p);obj_bus(i);obj_id(p)
+CubX;C;CubX;A;0;Ext
+Cub0;C;Cub0;A;0;LnG
+Cub1;C;Cub1;B;1;LnG

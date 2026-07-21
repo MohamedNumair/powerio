@@ -104,8 +104,21 @@ fn infer_distribution_json_format(text: &str) -> DistTargetFormat {
     }
 }
 
+/// Whether `name` selects the DIgSILENT DGS reader. DGS is a distribution
+/// *source* only (there is no DGS distribution writer), so it is recognized
+/// ahead of the writable [`DistTargetFormat`] enum.
+fn is_dgs_name(name: &str) -> bool {
+    matches!(
+        canonical_key(name).as_str(),
+        "dgs" | "digsilent" | "powerfactory" | "powerfactorydgs"
+    )
+}
+
 /// Parses `text` in the named format (see [`dist_target_from_name`]).
 pub fn parse_str(text: &str, format: &str) -> crate::Result<DistNetwork> {
+    if is_dgs_name(format) {
+        return crate::dgs::parse_dgs_str(text);
+    }
     match format.parse::<DistTargetFormat>()? {
         DistTargetFormat::Dss => Ok(crate::dss::parse_dss_str(text)),
         DistTargetFormat::BmopfJson => crate::bmopf::parse_bmopf_str(text),
@@ -120,6 +133,17 @@ pub fn parse_file(
     from: Option<&str>,
 ) -> crate::Result<DistNetwork> {
     let path = path.as_ref();
+    // DGS is a read-only distribution source: recognize it by name, or by the
+    // `.dgs` extension when the format is unforced, ahead of the writable
+    // target dispatch.
+    if from.is_some_and(is_dgs_name)
+        || (from.is_none()
+            && path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dgs")))
+    {
+        return crate::dgs::parse_dgs_file(path);
+    }
     // Dss goes through the path-based parser (Redirect/Compile resolve
     // against the file's directory); the JSON readers take text.
     let format = if let Some(from) = from {

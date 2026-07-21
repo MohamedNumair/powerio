@@ -2,7 +2,11 @@
 //! converters between OpenDSS `.dss`, PowerModelsDistribution ENGINEERING
 //! JSON ("PMD JSON"), and the draft JSON schema of the IEEE PES Task Force on
 //! Benchmarking Multiconductor OPF ("BMOPF JSON",
-//! <https://github.com/frederikgeth/bmopf-report>).
+//! <https://github.com/frederikgeth/bmopf-report>). DIgSILENT PowerFactory
+//! DGS ASCII exports read into the same model (read only, [`dgs`]): explicit
+//! natural-coordinate conductor matrices are used verbatim when the export
+//! carries them, symmetrical `TypLne` sequence data is expanded by Fortescue
+//! otherwise, and bare geometry types are skipped with re-export guidance.
 //!
 //! The canonical model is a network in wire coordinates: string bus ids,
 //! ordered string terminal names per bus, explicit grounding, terminal maps
@@ -45,6 +49,7 @@
 
 pub mod bmopf;
 pub mod convert;
+pub mod dgs;
 pub mod diagnostics;
 pub mod dss;
 pub mod error;
@@ -61,6 +66,7 @@ pub use convert::{
     Conversion, ConversionSidecar, DistTargetFormat, convert_file, convert_str,
     dist_target_from_name, parse_file, parse_str,
 };
+pub use dgs::{parse_dgs_file, parse_dgs_str};
 pub use diagnostics::{DiagnosticCode, DiagnosticSeverity, DiagnosticStage, StructuredDiagnostic};
 pub use dss::{
     DssLoadVoltageBounds, DssWriteOptions, parse_dss_file, parse_dss_str, write_dss,

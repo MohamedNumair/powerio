@@ -1317,7 +1317,19 @@ fn run_convert(
     // letting the wrong family's reader produce a confusing format error. The
     // input family comes from --from (gridfm reads into the transmission
     // model), from a clear extension, or from the shared JSON classifier.
-    let input_is_dist = if let Some(f) = from {
+    //
+    // DGS is the one input that reads into BOTH families: the balanced
+    // transmission reader (powerio) and the multiconductor distribution reader
+    // (powerio-dist). The target format picks which, so DGS is family-agnostic
+    // here (`None`) and the dispatch below routes it by `to`.
+    let source_is_dgs = matches!(from, Some(FormatArg::Dgs))
+        || (from.is_none()
+            && input
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dgs")));
+    let input_is_dist = if source_is_dgs {
+        None
+    } else if let Some(f) = from {
         Some(f.distribution().is_some())
     } else {
         infer_input_family(input)?

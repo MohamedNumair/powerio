@@ -202,6 +202,24 @@ code `READ.TRANSMISSION.PARSE_WARNING`. GridFM package reads use
   are rejected with a message pointing to the ASCII DGS export path. A same
   format write echoes the retained decoded source: byte exact for a UTF-8
   source, and decoded-normalized for a Latin-1 or UTF-16 source.
+- **DIgSILENT DGS to distribution** (read, `powerio_dist::dgs`) maps the same
+  `.dgs` file into the multiconductor wire-coordinate model for OpenDSS, PMD
+  JSON, and BMOPF JSON targets, so DGS is the one dual-family input (the
+  target format picks the reader). Line impedance is tiered by what the export
+  carries: explicit natural-coordinate conductor matrices
+  (`R_c1`/`X_c1`/`G_c1`/`B_c1`, as denormalized `:SIZEROW` column groups or the
+  DGS 7.0 normalized `$$Matrix` table) are used verbatim — per-phase asymmetry
+  and a 4th-wire neutral survive untouched; symmetrical `TypLne` sequence data
+  expands to a transposed 3x3 by Fortescue
+  (\\(Z_s = (Z_0 + 2Z_1)/3\\), \\(Z_m = (Z_0 - Z_1)/3\\)) with the transposition
+  assumption surfaced as a note and missing zero-sequence data warned; a bare
+  `TypTow`/`TypGeo`/`TypCabsys` geometry with no exported matrices is skipped
+  with re-export guidance, never fabricated (Carson evaluation from geometry is
+  out of scope). Single-phase loads land on the cubicle-pinned phase
+  (`StaCubic.cPhInfo`), transformer vector groups map to wye/delta windings
+  with the short-circuit voltage on the winding base, and the `ElmXnet`
+  external grid becomes the single phase-to-neutral voltage source. DGS is
+  read only on this side; there is no DGS writer from the distribution model.
 - **gridfm** (read, the `gridfm` feature in `powerio-matrix`) reconstructs a
   `Network` from the gridfm-datakit Parquet dataset: lossy, but it recovers
   everything a power flow needs. That is bus types/voltages/limits, nodal load
