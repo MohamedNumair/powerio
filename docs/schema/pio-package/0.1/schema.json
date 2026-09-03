@@ -3577,6 +3577,11 @@
           "const": "SurgeJson",
           "description": "Read from a Surge native JSON document.",
           "type": "string"
+        },
+        {
+          "const": "Dgs",
+          "description": "Read from a DIgSILENT PowerFactory DGS ASCII case (`.dgs`, versions\n5/6/7). The reader retains the decoded source text, so a same-format write\nechoes it (byte-for-byte for a UTF-8 source; decoded-normalized for a\nLatin-1 or UTF-16 source); a cross-format or source-dropped write goes\nthrough the DGS 7.0 serializer ([`write_dgs`](crate::write_dgs)).",
+          "type": "string"
         }
       ]
     },
