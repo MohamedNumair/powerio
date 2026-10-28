@@ -37,9 +37,13 @@ They covered the complete original diff, then cross-checked the fixes.
 | Neutral poles, phase order, delta branch labels or load voltage bases changed | Distribution physical regression suite and native RAVENS schema gate |
 | Kron-reduced transformer neutrals, angle units, switch shunts and zero-resistance leakage were recovered incorrectly | PMD reader/writer regressions and native PMD exports |
 | Unbounded transformer ratings became zero capacity and erased impedance | Positive computational impedance base with explicit imputation, while the capacity remains unbounded |
+| Center-tap polarity and asymmetric leakage changed during canonical conversion | Native PMD-derived winding-orientation regression and BMOPF explicit-zero leakage cases |
 | Tiny malformed inputs caused panics or unbounded dimension allocation | Direct reader/writer malformed-input regressions and seeded `ravens_pmd_math` fuzz target |
 | Unrelated warnings concealed electrical changes in the conversion matrix | Independent physical comparisons and a mutation test that corrupts an impedance despite unchanged metadata warnings |
 | Report truncation hid field differences and fixture identity | Uncapped matrix detail output with fixture labels; bounded corpus reporting retains its existing API |
+| The matrix compared an eliminated grounded return with earth as different nodes | Restored ground identity in the expected projection, with a mutation check that still rejects reversed winding orientation |
+| CGMES voltage limits remained only in detailed connectivity | Apply the limits to member calculation buses and check both supported CGMES versions |
+| Identifier substitutions and omitted area memberships were silent in exchange routes | Report actual old/new bus identifiers and lost areas; unchanged default IIDM area 1 does not trigger a loss finding |
 
 ## Independent oracles
 

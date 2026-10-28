@@ -7607,6 +7607,18 @@ fn derive_detailed_connectivity(
             // reader turns back into the bus number and name.
             let configured_bus =
                 component_id("bus", &format!("B{}", bus.id)).expect("derived bus identity");
+            if let Some(uid) = bus.uid.as_deref()
+                && uid != configured_bus.local_id()
+            {
+                diagnostics.push(
+                    &codes::EMIT_XIIDM.value_substituted,
+                    format!(
+                        "bus {} uid `{uid}` is replaced by configured bus id `{}`",
+                        bus.id,
+                        configured_bus.local_id()
+                    ),
+                );
+            }
             let properties = psse_bus_properties(bus);
             if bus.name.is_some() || !properties.is_empty() {
                 detailed.component_metadata.push(ComponentMetadata {
@@ -11392,7 +11404,7 @@ fn diagnose_unwritten_bus_areas(network: &BalancedNetwork, diagnostics: &mut Dia
     let unrepresented = network
         .buses()
         .iter()
-        .filter(|bus| bus.area > 0 && !areas.contains(&bus.area))
+        .filter(|bus| bus.area != 1 && !areas.contains(&bus.area))
         .count();
     if unrepresented > 0 {
         diagnostics.push(&codes::EMIT_XIIDM.field_dropped, format!(
@@ -16249,11 +16261,44 @@ mod tests {
     }
 
     #[test]
-    fn missing_area_records_diagnose_bus_assignments_including_default_one() {
+    fn derived_bus_identifier_changes_are_diagnosed() {
+        let mut network = parse_xiidm_source(BUS_BREAKER, &mut Diagnostics::new()).unwrap();
+        *network.detailed_connectivity_mut() = None;
+        network.buses_mut()[0].uid = Some("source-bus".to_owned());
+        for (emission, code) in [
+            (
+                write_xiidm(&network).unwrap(),
+                codes::EMIT_XIIDM.value_substituted.code,
+            ),
+            (
+                write_jiidm(&network).unwrap(),
+                codes::EMIT_JIIDM.value_substituted.code,
+            ),
+        ] {
+            assert!(emission.diagnostics.iter().any(|d| {
+                d.code() == code
+                    && d.message()
+                        .contains("uid `source-bus` is replaced by configured bus id `B1`")
+            }));
+        }
+        let emission = write_xiidm(&network).unwrap();
+        let restored = parse_xiidm_source(&emission.text, &mut Diagnostics::new()).unwrap();
+        assert_eq!(restored.buses()[0].uid.as_deref(), Some("B1"));
+        assert!(
+            !write_xiidm(&restored)
+                .unwrap()
+                .diagnostics
+                .iter()
+                .any(|d| d.message().contains("is replaced by configured bus id"))
+        );
+    }
+
+    #[test]
+    fn missing_area_records_diagnose_only_changed_bus_assignments() {
         let mut network = parse_xiidm_source(BUS_BREAKER, &mut Diagnostics::new()).unwrap();
         network.buses_mut()[0].area = 1;
         network.buses_mut()[1].area = 2;
-        let message = "2 bus area assignment(s) have no matching area record";
+        let message = "1 bus area assignment(s) have no matching area record";
         for (emission, code) in [
             (
                 write_xiidm(&network).unwrap(),
@@ -16272,6 +16317,32 @@ mod tests {
                 emission.render_diagnostics()
             );
         }
+        let emission = write_xiidm(&network).unwrap();
+        let restored = parse_xiidm_source(&emission.text, &mut Diagnostics::new()).unwrap();
+        assert_eq!(
+            restored
+                .buses()
+                .iter()
+                .map(|bus| bus.area)
+                .collect::<Vec<_>>(),
+            vec![1, 1]
+        );
+        let canonical = write_xiidm(&restored).unwrap();
+        assert!(
+            !canonical
+                .diagnostics
+                .iter()
+                .any(|finding| finding.message().contains("bus area assignment(s)"))
+        );
+        network.buses_mut()[0].area = 0;
+        assert!(
+            write_xiidm(&network)
+                .unwrap()
+                .diagnostics
+                .iter()
+                .any(|finding| finding.message().contains("2 bus area assignment(s)"))
+        );
+        network.buses_mut()[0].area = 1;
         network.areas_mut().extend([Area::new(1), Area::new(2)]);
         let emission = write_xiidm(&network).unwrap();
         assert!(!emission.diagnostics.iter().any(|finding| {
