@@ -38,7 +38,7 @@ fn case3_balanced_maps_exactly() {
     assert!(
         net.warnings
             .iter()
-            .any(|w| w.contains("READ.RAVENS.VALUE_DEFAULTED") && w.contains("frequency")),
+            .any(|w| w.contains("READ.RAVENS_DIST.VALUE_DEFAULTED") && w.contains("frequency")),
         "warnings: {:?}",
         net.warnings
     );
@@ -49,7 +49,7 @@ fn case3_balanced_maps_exactly() {
     let loadbus = net.bus("loadbus").expect("loadbus present");
     assert!(loadbus.terminals.contains(&"4".to_string()));
     assert_eq!(loadbus.grounded, vec!["4".to_string()]);
-    assert!(net.bus("primary").unwrap().grounded.is_empty());
+    assert_eq!(net.bus("primary").unwrap().grounded, Vec::<String>::new());
 
     // Two per-length impedance matrices become two linecodes, ohm/m, the
     // shunt susceptance split in half at each end.
@@ -128,7 +128,7 @@ fn case3_balanced_maps_exactly() {
     assert!(
         net.warnings
             .iter()
-            .any(|w| w.contains("READ.RAVENS.CLASS_UNMAPPED")
+            .any(|w| w.contains("READ.RAVENS_DIST.CLASS_UNMAPPED")
                 && w.contains("EnergyConsumerSchedule")),
         "warnings: {:?}",
         net.warnings
@@ -417,7 +417,9 @@ fn dss_zip_load_round_trips_through_ravens() {
     let net = parse_file(dss, None).unwrap();
     let conv = net.emit_value(DistTargetFormat::RavensJson);
     assert!(
-        conv.warnings.iter().all(|w| w.contains("EMIT.RAVENS.")),
+        conv.warnings
+            .iter()
+            .all(|w| w.contains("EMIT.RAVENS_DIST.")),
         "every writer finding carries an EMIT.RAVENS code: {:?}",
         conv.warnings
     );

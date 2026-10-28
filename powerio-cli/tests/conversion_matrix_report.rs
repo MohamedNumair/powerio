@@ -94,7 +94,6 @@ const BLESS_ENV: &str = "POWERIO_MATRIX_BLESS";
 const REPORT_MARKER: &str = "<!-- powerio-conversion-matrix-report -->";
 const DETAILS_MARKER: &str = "<!-- powerio-conversion-matrix-details -->";
 const BASELINE_FILE: &str = "tests/conversion_matrix.baseline";
-const MAX_DETAILS_PER_CELL: usize = 6;
 static DSS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 const LEGEND: [&str; 4] = [
@@ -187,10 +186,9 @@ fn warning_level(segment: &str, leg: Leg) -> Option<(Level, String)> {
         "TRANSFORMER_UNSUPPORTED" => (Level::Dropped, "transformer"),
         // The sources are all written, but the BMOPF formulation reads only
         // one of them.
-        "SOURCE_COUNT" => (Level::Approximate, "source"),
         // An unbalanced source is written as one single phase source per
         // conductor: the same terminal phasors, more source records.
-        "SOURCE_SPLIT" => (Level::Approximate, "source"),
+        "SOURCE_COUNT" | "SOURCE_SPLIT" => (Level::Approximate, "source"),
         // A three phase wye-wye transformer becomes one BMOPF unit per
         // phase: the same windings, more transformer records.
         "TRANSFORMER_WYE_WYE_DECOMPOSED" => (Level::Approximate, "transformer"),
@@ -250,7 +248,7 @@ fn every_level_has_a_finding_shape() {
 /// One source and target pair, or a row's Source column.
 #[derive(Default)]
 struct Cell {
-    findings: Vec<(Leg, Diagnostic)>,
+    findings: Vec<(&'static str, Leg, Diagnostic)>,
     /// Write and read failures and invariant failures.
     failures: Vec<String>,
     /// Typed model fields the conversion changed.
@@ -280,16 +278,16 @@ struct Grade {
 }
 
 impl Cell {
-    fn record(&mut self, leg: Leg, diagnostics: &[Diagnostic]) {
+    fn record(&mut self, case: &'static str, leg: Leg, diagnostics: &[Diagnostic]) {
         self.findings
-            .extend(diagnostics.iter().map(|d| (leg, d.clone())));
+            .extend(diagnostics.iter().map(|d| (case, leg, d.clone())));
     }
 
     fn grade(&self) -> Grade {
         let mut graded = Vec::new();
         let mut codes = BTreeMap::new();
         let mut unclassified = BTreeSet::new();
-        for (leg, diagnostic) in &self.findings {
+        for (_, leg, diagnostic) in &self.findings {
             match grade_finding(*leg, diagnostic) {
                 Ok(None) => continue,
                 Ok(Some(found)) => graded.push(found),
@@ -314,8 +312,8 @@ impl Cell {
         let error_codes: BTreeSet<String> = self
             .findings
             .iter()
-            .filter(|(_, d)| d.severity() == DiagnosticSeverity::Error)
-            .map(|(_, d)| d.code().to_owned())
+            .filter(|(_, _, d)| d.severity() == DiagnosticSeverity::Error)
+            .map(|(_, _, d)| d.code().to_owned())
             .collect();
         let unreported_change = level <= Level::Restated && !self.model_diffs.is_empty();
         if unreported_change || !self.failures.is_empty() {
@@ -622,13 +620,13 @@ fn render_details(matrices: &[(&str, Matrix)], judged: &BTreeMap<String, Judged>
                 .unwrap();
             }
             let mut texts = BTreeMap::<(String, String), usize>::new();
-            for (leg, diagnostic) in &cell.findings {
+            for (case, leg, diagnostic) in &cell.findings {
                 let level = grade_finding(*leg, diagnostic)
                     .ok()
                     .flatten()
                     .map_or("unclassified", |(level, _)| level.name());
                 let text = format!(
-                    "{}: {}",
+                    "[{case}] {}: {}",
                     diagnostic.code(),
                     sanitize_report_text(diagnostic.message())
                 );
@@ -638,12 +636,8 @@ fn render_details(matrices: &[(&str, Matrix)], judged: &BTreeMap<String, Judged>
             }
             let mut texts: Vec<_> = texts.into_iter().collect();
             texts.sort_by(|(a, x), (b, y)| y.cmp(x).then_with(|| a.cmp(b)));
-            for ((leg, text), count) in texts.iter().take(MAX_DETAILS_PER_CELL) {
+            for ((leg, text), count) in &texts {
                 writeln!(markdown, "  - {leg}: {count}x {}", one_line(text)).unwrap();
-            }
-            let omitted = texts.len().saturating_sub(MAX_DETAILS_PER_CELL);
-            if omitted > 0 {
-                writeln!(markdown, "  - {omitted} more finding texts").unwrap();
             }
         }
     }
@@ -1117,7 +1111,7 @@ fn run_transmission_matrix() -> Matrix {
         match &payloads {
             Ok(payloads) => {
                 for payload in payloads {
-                    source_cell.record(Leg::Source, &payload.parse_findings);
+                    source_cell.record(payload.label, Leg::Source, &payload.parse_findings);
                 }
             }
             Err(err) => source_cell.failures.push(err.clone()),
@@ -1204,7 +1198,7 @@ fn echo_transmission(payload: &TransmissionPayload, target: TransmissionFormat, 
         }
     };
     let echoed = emit_transmission(&payload.module, target).and_then(|echo| {
-        cell.record(Leg::Write, &echo.diagnostics);
+        cell.record(payload.label, Leg::Write, &echo.diagnostics);
         echo.emitted.files()
     });
     let exact = match echoed {
@@ -1261,7 +1255,7 @@ fn validate_transmission_pair(
             return;
         }
     };
-    cell.record(Leg::Write, &conversion.diagnostics);
+    cell.record(payload.label, Leg::Write, &conversion.diagnostics);
     let parsed = match parse_transmission_emitted(&conversion.emitted, target) {
         Ok(parsed) => parsed,
         Err(err) => {
@@ -1272,7 +1266,7 @@ fn validate_transmission_pair(
             return;
         }
     };
-    cell.record(Leg::Readback, &parsed.diagnostics);
+    cell.record(payload.label, Leg::Readback, &parsed.diagnostics);
     let held = network_a_target_holds(&payload.network, target);
     let tolerance = electrical_tolerance(target, &held);
     let actual = transmission_core(&parsed.network);
@@ -1707,7 +1701,7 @@ fn run_distribution_matrix() -> Matrix {
         match &payloads {
             Ok(payloads) => {
                 for payload in payloads {
-                    source_cell.record(Leg::Source, &payload.parse_findings);
+                    source_cell.record(payload.label, Leg::Source, &payload.parse_findings);
                 }
             }
             Err(err) => source_cell.failures.push(err.clone()),
@@ -1802,7 +1796,7 @@ fn validate_distribution_pair(
             return;
         }
     };
-    cell.record(Leg::Write, &conversion.diagnostics);
+    cell.record(payload.label, Leg::Write, &conversion.diagnostics);
     let echoed = diagonal && conversion.text == payload.text;
     if diagonal {
         if !echoed {
@@ -1816,7 +1810,7 @@ fn validate_distribution_pair(
     match parse_distribution_text(&conversion, target) {
         Ok(parsed) => {
             if !echoed {
-                cell.record(Leg::Readback, &parsed.diagnostics);
+                cell.record(payload.label, Leg::Readback, &parsed.diagnostics);
             }
             let before = source_equivalents::contract_source_pairs(&payload.network);
             let after = source_equivalents::contract_source_pairs(&parsed.network);
@@ -2089,5 +2083,43 @@ fn balanced_network(value: &powerio::PioValue) -> Option<&BalancedNetwork> {
         // format carries.
         powerio::PioValue::AcScucInstance(instance) => Some(instance.network()),
         _ => None,
+    }
+}
+
+#[test]
+fn finding_artifact_preserves_rare_findings_and_case_identity() {
+    let mut cell = Cell::default();
+    for index in 0..8 {
+        let finding = Diagnostic::new(
+            powerio_core::DiagnosticCode::new("EMIT.TEST.FIELD_DROPPED").unwrap(),
+            DiagnosticSeverity::Warning,
+            format!("field {index} was dropped"),
+        );
+        cell.record("transformer with taps", Leg::Write, &[finding]);
+    }
+    let matrix = Matrix {
+        sources: vec!["source"],
+        targets: vec!["target"],
+        groups: vec![],
+        source_cells: vec![Cell::default()],
+        cells: vec![vec![cell]],
+    };
+    let judged = matrix
+        .keyed_cells()
+        .into_iter()
+        .map(|(key, cell)| {
+            let entry = Judged {
+                key: key.clone(),
+                grade: cell.grade(),
+                problems: vec![],
+            };
+            (key, entry)
+        })
+        .collect();
+    let details = render_details(&[("Test", matrix)], &judged);
+    for index in 0..8 {
+        assert!(details.contains(&format!(
+            "[transformer with taps] EMIT.TEST.FIELD_DROPPED: field {index} was dropped"
+        )));
     }
 }

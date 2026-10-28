@@ -6703,7 +6703,9 @@
         "bmopf-json",
         "pmd-json",
         "cim-dist",
-        "sincal"
+        "sincal",
+        "ravens-json",
+        "pmd-math-json"
       ],
       "type": "string"
     },
@@ -14354,6 +14356,11 @@
         {
           "const": "sincal",
           "description": "A SINCAL project read using the explicitly selected balanced profile.",
+          "type": "string"
+        },
+        {
+          "const": "ravens-json",
+          "description": "Read from an MG-RAVENS JSON document (the LANL CIM-derived interchange\nschema), balanced subset.",
           "type": "string"
         }
       ]

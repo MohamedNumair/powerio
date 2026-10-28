@@ -62,7 +62,7 @@ pub(crate) fn parse_ravens_collecting(
         consumed: BTreeSet::new(),
     };
     mapper.warn(
-        &C::READ_RAVENS_VALUE_DEFAULTED,
+        &C::READ_RAVENS_DIST_VALUE_DEFAULTED,
         "MG-RAVENS carries no system frequency; base_frequency assumes the OpenDSS default \
          (60 Hz)",
     );
@@ -491,7 +491,7 @@ impl Mapper<'_> {
             if n == 0 {
                 let name = obj.name.clone();
                 self.warn(
-                    &C::READ_RAVENS_RECORD_DROPPED,
+                    &C::READ_RAVENS_DIST_RECORD_DROPPED,
                     format!("PerLengthPhaseImpedance {name}: no impedance rows; linecode skipped"),
                 );
                 continue;
@@ -632,7 +632,7 @@ impl Mapper<'_> {
                     }
                     if conflicts {
                         self.warn(
-                            &C::READ_RAVENS_VALUE_CONFLICT,
+                            &C::READ_RAVENS_DIST_VALUE_CONFLICT,
                             format!(
                                 "line {name}: emergency ampacity {emerg} conflicts with an \
                              earlier line sharing linecode {code_name}; keeping the first \
@@ -859,7 +859,7 @@ impl Mapper<'_> {
                     map = pair;
                 } else {
                     self.warn(
-                        &C::READ_RAVENS_RECORD_DROPPED,
+                        &C::READ_RAVENS_DIST_RECORD_DROPPED,
                         format!(
                             "load {name}: single-phase delta needs a two-phase terminal code; \
                          kept untyped"
@@ -883,7 +883,7 @@ impl Mapper<'_> {
                 vec![v; phases]
             } else {
                 self.warn(
-                    &C::READ_RAVENS_VALUE_DEFAULTED,
+                    &C::READ_RAVENS_DIST_VALUE_DEFAULTED,
                     format!("load {name}: no BaseVoltage; nominal voltage left unset"),
                 );
                 Vec::new()
@@ -1033,7 +1033,7 @@ impl Mapper<'_> {
             let grounded = kind == Some("Yn");
             if delta {
                 self.warn(
-                    &C::READ_RAVENS_VALUE_COLLAPSED,
+                    &C::READ_RAVENS_DIST_VALUE_COLLAPSED,
                     format!(
                         "shunt {name}: delta connection kept as per-phase diagonal susceptance; \
                      the off-diagonal geometry is not reconstructed"
@@ -1203,7 +1203,7 @@ impl Mapper<'_> {
                 "BatteryUnit" => IbrPrimeMover::Battery,
                 _ => {
                     self.warn(
-                        &C::READ_RAVENS_VALUE_SUBSTITUTED,
+                        &C::READ_RAVENS_DIST_VALUE_SUBSTITUTED,
                         format!(
                             "power electronics {name}: unit type `{unit_kind}` is not typed; \
                          treated as a generic inverter"
@@ -1406,7 +1406,7 @@ impl Mapper<'_> {
             });
             let Some(info) = info else {
                 self.warn(
-                    &C::READ_RAVENS_RECORD_DROPPED,
+                    &C::READ_RAVENS_DIST_RECORD_DROPPED,
                     format!(
                         "transformer tank {name}: no TransformerTankInfo datasheet; the tank has \
                      no voltages or impedances and is kept untyped"
@@ -1456,7 +1456,7 @@ impl Mapper<'_> {
             ends.sort_by_key(|(num, _)| *num);
             if ends.len() < 2 {
                 self.warn(
-                    &C::READ_RAVENS_RECORD_DROPPED,
+                    &C::READ_RAVENS_DIST_RECORD_DROPPED,
                     format!("transformer tank {name}: fewer than two ends; kept untyped"),
                 );
                 self.keep_untyped(tank, "fewer than two ends");
@@ -1478,7 +1478,7 @@ impl Mapper<'_> {
                     .map(str::to_owned);
                 let Some(node) = node else {
                     self.warn(
-                        &C::READ_RAVENS_RECORD_DROPPED,
+                        &C::READ_RAVENS_DIST_RECORD_DROPPED,
                         format!("transformer tank {name}: end {num} has no terminal; kept untyped"),
                     );
                     ok = false;
@@ -1493,7 +1493,7 @@ impl Mapper<'_> {
                     .unwrap_or_default();
                 let Some(einfo) = end_infos.get(num) else {
                     self.warn(
-                        &C::READ_RAVENS_RECORD_DROPPED,
+                        &C::READ_RAVENS_DIST_RECORD_DROPPED,
                         format!(
                             "transformer tank {name}: end {num} has no TransformerEndInfo; \
                          kept untyped"
@@ -1512,7 +1512,7 @@ impl Mapper<'_> {
                         "D" | "A" => DistWindingConn::Delta,
                         "Y" | "Yn" | "I" => DistWindingConn::Wye,
                         other => {
-                            self.warn(&C::READ_RAVENS_VALUE_SUBSTITUTED, format!(
+                            self.warn(&C::READ_RAVENS_DIST_VALUE_SUBSTITUTED, format!(
                             "transformer tank {name}: end {num} connection `{other}` is not \
                              typed; treated as wye"
                         ));
@@ -1525,7 +1525,7 @@ impl Mapper<'_> {
                     && clock != 0
                 {
                     self.warn(
-                        &C::READ_RAVENS_FIELD_UNMAPPED,
+                        &C::READ_RAVENS_DIST_FIELD_UNMAPPED,
                         format!(
                             "transformer tank {name}: end {num} phaseAngleClock {clock} is \
                          not modeled (the model carries no vector-group shift)"
@@ -1625,7 +1625,7 @@ impl Mapper<'_> {
                             found_sc = true;
                         } else if windings.len() > 2 {
                             self.warn(
-                                &C::READ_RAVENS_FIELD_UNMAPPED,
+                                &C::READ_RAVENS_DIST_FIELD_UNMAPPED,
                                 format!(
                                     "transformer tank {name}: additional short-circuit test on \
                                  end {num} is not mapped (winding-pair topology beyond two \
@@ -1718,7 +1718,7 @@ impl Mapper<'_> {
             windings[i].tap = ratio;
         }
         self.warn(
-            &C::READ_RAVENS_RETAINED_SOURCE_ONLY,
+            &C::READ_RAVENS_DIST_RETAINED_SOURCE_ONLY,
             format!(
                 "transformer tank {tank}: RatioTapChanger sets the winding tap to {ratio}; the \
              regulator control settings are preserved untyped"
@@ -1790,7 +1790,7 @@ impl Mapper<'_> {
             .collect();
         for node in missing {
             self.warn(
-                &C::READ_RAVENS_VALUE_DEFAULTED,
+                &C::READ_RAVENS_DIST_VALUE_DEFAULTED,
                 format!("terminal points at undeclared ConnectivityNode `{node}`; bus created"),
             );
             let terminals: Vec<String> = self.node_terminals[&node]
@@ -1849,7 +1849,7 @@ impl Mapper<'_> {
 
     fn keep_untyped(&mut self, obj: &Obj, why: &str) {
         self.warn(
-            &C::READ_RAVENS_RETAINED_SOURCE_ONLY,
+            &C::READ_RAVENS_DIST_RETAINED_SOURCE_ONLY,
             format!(
                 "{} {}: {why}; preserved untyped (round-trips to MG-RAVENS, dropped elsewhere)",
                 obj.kind, obj.name
@@ -1889,7 +1889,7 @@ impl Mapper<'_> {
         }
         for (kind, count) in by_kind {
             self.warn(
-                &C::READ_RAVENS_CLASS_UNMAPPED,
+                &C::READ_RAVENS_DIST_CLASS_UNMAPPED,
                 format!(
                     "{count} {kind} object(s) have no typed model; preserved untyped \
                  (round-trips to MG-RAVENS, dropped elsewhere)"

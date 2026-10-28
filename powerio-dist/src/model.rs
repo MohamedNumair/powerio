@@ -37,9 +37,11 @@ pub enum DistSourceFormat {
     PmdJson,
     CimDist,
     Sincal,
-    /// MG-RAVENS JSON, the multiconductor (distribution) profile.
+    // Keep variant comments out of the schema: IR 2 represents this as a
+    // string enum, rather than a union of documented constants.
+    // MG-RAVENS JSON, the multiconductor (distribution) profile.
     RavensJson,
-    /// PowerModelsDistribution MATHEMATICAL model JSON.
+    // PowerModelsDistribution MATHEMATICAL model JSON.
     PmdMathJson,
 }
 

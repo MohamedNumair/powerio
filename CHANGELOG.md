@@ -21,7 +21,7 @@
   segment's neutral conductor, each segment end's own phase code (so a
   lateral landing on another phase keeps both ends), `Yn` for a bank whose
   neutral is grounded, and an unbalanced source as one single phase
-  `EnergySource` per conductor (`EMIT.RAVENS.SOURCE_SPLIT`); a segment with
+  `EnergySource` per conductor (`EMIT.RAVENS_DIST.SOURCE_SPLIT`); a segment with
   a conductor outside the CIM phase identities is dropped with a finding.
   Mohamed Numair wrote both readers and writers; this release ports them
   onto the shared `powerio-dist` and `powerio-tx` hubs.

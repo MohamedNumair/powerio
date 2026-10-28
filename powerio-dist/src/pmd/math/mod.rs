@@ -10,11 +10,11 @@
 //! MATHEMATICAL objects each ENGINEERING object became, and `bus_lookup`
 //! names each bus's index.
 //!
-//! The writer ([`write`]) performs that lowering from the typed network,
+//! The writer performs that lowering from the typed network,
 //! following `eng2math.jl`, `make_per_unit!`, and `calc_voltage_bases` of PMD
 //! v0.16: the same object names, `source_id`s, virtual element names, and
 //! per unit conventions, so PMD reads the output as its own and the oracle
-//! tests compare the two value by value. The reader ([`read`]) inverts the
+//! tests compare the two value by value. The reader inverts the
 //! per unit scaling with the document's own bases and folds the virtual
 //! elements back through `map`, so a MATHEMATICAL document parses to the
 //! same [`MulticonductorNetwork`] its ENGINEERING source would, with the

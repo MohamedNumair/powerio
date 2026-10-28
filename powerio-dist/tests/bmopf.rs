@@ -4096,3 +4096,31 @@ fn bmopf_geometry_without_element_identity_is_reported() {
             .any(|warning| warning.contains("missing kind or id"))
     );
 }
+
+#[test]
+fn pmd_time_series_is_not_interpreted_as_a_bmopf_table() {
+    let text = std::fs::read_to_string(fixture("pmd/case3_balanced.json")).unwrap();
+    let mut parsed = parse_pmd_str(&text).unwrap();
+    // Canonical emission must keep the originating schema distinct even
+    // after the retained-source echo tier is disabled.
+    *parsed.source_format_mut() = None;
+    for version in [BmopfSchemaVersion::Bmopf010, BmopfSchemaVersion::Bmopf020] {
+        let output = emit_bmopf_json_with_options(
+            &parsed,
+            BmopfEmitOptions::default().with_schema_version(version),
+        );
+        assert_eq!(
+            errors(&schema_validator_for(version), &output.text),
+            Vec::<String>::new()
+        );
+        let doc: serde_json::Value = serde_json::from_str(&output.text).unwrap();
+        assert!(doc.get("time_series").is_none());
+        assert!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.code() == "EMIT.BMOPF.RECORD_DROPPED"
+                    && d.message().contains("time_series ls1"))
+        );
+    }
+}

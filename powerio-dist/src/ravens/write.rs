@@ -220,7 +220,7 @@ impl Writer {
         Number::from_f64(v).map_or_else(
             || {
                 self.warn(
-                    &C::EMIT_RAVENS_NOT_A_NUMBER,
+                    &C::EMIT_RAVENS_DIST_NOT_A_NUMBER,
                     format!("{what}: non-finite value cannot be carried by JSON; emitted 0"),
                 );
                 Value::from(0)
@@ -252,7 +252,7 @@ impl Writer {
                 continue;
             }
             self.warn(
-                &C::EMIT_RAVENS_EXTRAS_DROPPED,
+                &C::EMIT_RAVENS_DIST_EXTRAS_DROPPED,
                 format!(
                     "{what}: extra `{key}` has no MG-RAVENS slot; dropped (the schema closes \
                  every class with additionalProperties: false)"
@@ -486,7 +486,7 @@ impl Writer {
         for code in net.line_codes() {
             if code.n_conductors > 4 {
                 self.warn(
-                    &C::EMIT_RAVENS_VALUE_COLLAPSED,
+                    &C::EMIT_RAVENS_DIST_VALUE_COLLAPSED,
                     format!(
                         "linecode {}: {} conductors exceed the four CIM SinglePhaseKind identities \
                      (A/B/C/N); the impedance matrix is written in full, but conductors beyond \
@@ -549,7 +549,7 @@ impl Writer {
             self.warn_extras(&format!("linecode {}", code.name), &code.extras, &[]);
             if code.s_max.is_some() {
                 self.warn(
-                    &C::EMIT_RAVENS_FIELD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                     format!(
                         "linecode {}: `s_max` power rating has no MG-RAVENS slot; dropped \
                      (ampacity carries through the line current limits)",
@@ -588,7 +588,7 @@ impl Writer {
                 .filter(|t| terminal_phase(t).is_none())
                 .collect();
             if !unspelled.is_empty() {
-                self.warn(&C::EMIT_RAVENS_RECORD_DROPPED, format!(
+                self.warn(&C::EMIT_RAVENS_DIST_RECORD_DROPPED, format!(
                     "{what}: conductor(s) {unspelled:?} have no CIM phase identity (A, B, C, N), \
                      so the segment cannot be stated; dropped"
                 ));
@@ -607,7 +607,7 @@ impl Writer {
                 }
                 _ => {
                     if line.terminal_map_to != line.terminal_map_from {
-                        self.warn(&C::EMIT_RAVENS_VALUE_COLLAPSED, format!(
+                        self.warn(&C::EMIT_RAVENS_DIST_VALUE_COLLAPSED, format!(
                             "{what}: the to side's terminal map {:?} has no MG-RAVENS phase code \
                              (a code lists phases in ABC order), so the from side's phases stand \
                              for both ends",
@@ -845,7 +845,7 @@ impl Writer {
 
             if load.extras.contains_key("pf") {
                 self.warn(
-                    &C::EMIT_RAVENS_VALUE_SUBSTITUTED,
+                    &C::EMIT_RAVENS_DIST_VALUE_SUBSTITUTED,
                     format!(
                         "{what}: the power-factor spec becomes an explicit reactive power \
                      (MG-RAVENS carries p and q, not pf)"
@@ -854,7 +854,7 @@ impl Writer {
             }
             if load.extras.contains_key("vminpu") || load.extras.contains_key("vmaxpu") {
                 self.warn(
-                    &C::EMIT_RAVENS_FIELD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                     format!(
                         "{what}: per-load voltage clamps (vminpu/vmaxpu) have no MG-RAVENS slot; \
                      dropped"
@@ -890,7 +890,7 @@ impl Writer {
                 | DistLoadVoltageModel::BoundedConstantPower { .. }
         ) {
             self.warn(
-                &C::EMIT_RAVENS_VALUE_SUBSTITUTED,
+                &C::EMIT_RAVENS_DIST_VALUE_SUBSTITUTED,
                 format!(
                     "load {}: voltage-band transitions, current limits and dropout have no \
                      LoadResponseCharacteristic field; emitted the nominal law",
@@ -954,7 +954,7 @@ impl Writer {
                         .all(|w| (w[0] - w[1]).abs() <= f64::EPSILON * w[0].abs().max(1.0));
                     if !uniform {
                         self.warn(
-                            &C::EMIT_RAVENS_VALUE_COLLAPSED,
+                            &C::EMIT_RAVENS_DIST_VALUE_COLLAPSED,
                             format!(
                                 "{what}: per-phase ZIP coefficients are not uniform; the first \
                              phase's value represents the load"
@@ -1042,7 +1042,7 @@ impl Writer {
                 );
             } else {
                 self.warn(
-                    &C::EMIT_RAVENS_FIELD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                     format!(
                         "load {}: shape `{schedule}` names a schedule this model does not carry; \
                      the profile row is emitted without a LoadProfile pointer",
@@ -1075,7 +1075,7 @@ impl Writer {
             });
             if uneven {
                 self.warn(
-                    &C::EMIT_RAVENS_VALUE_COLLAPSED,
+                    &C::EMIT_RAVENS_DIST_VALUE_COLLAPSED,
                     format!(
                         "{what}: per-phase susceptances differ; MG-RAVENS carries one per-section \
                      value, so the first phase represents the bank"
@@ -1089,7 +1089,7 @@ impl Writer {
                 .any(|(i, row)| row.iter().enumerate().any(|(j, v)| i != j && v.abs() > 0.0));
             if off_diagonal {
                 self.warn(
-                    &C::EMIT_RAVENS_VALUE_COLLAPSED,
+                    &C::EMIT_RAVENS_DIST_VALUE_COLLAPSED,
                     format!(
                         "{what}: off-diagonal susceptance (a delta bank's geometry) has no \
                      MG-RAVENS slot; only the diagonal is carried"
@@ -1241,7 +1241,7 @@ impl Writer {
             );
             if machine.cost.is_some() {
                 self.warn(
-                    &C::EMIT_RAVENS_FIELD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                     format!(
                         "{what}: generation cost has no slot in the distribution profile \
                      (cost functions belong to the balanced MG-RAVENS profile); dropped"
@@ -1342,7 +1342,7 @@ impl Writer {
                         Some(unit)
                     }
                     _ => {
-                        self.warn(&C::EMIT_RAVENS_FIELD_DROPPED, format!(
+                        self.warn(&C::EMIT_RAVENS_DIST_FIELD_DROPPED, format!(
                         "{what}: prime mover {:?} has no MG-RAVENS unit class; the connection \
                          is emitted without a PowerElectronicsUnit",
                         ibr.prime_mover
@@ -1373,13 +1373,13 @@ impl Writer {
             );
             if ibr.control_profile.is_some() {
                 self.warn(
-                    &C::EMIT_RAVENS_FIELD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                     format!("{what}: inverter control profile has no MG-RAVENS slot; dropped"),
                 );
             }
             if ibr.voltage_aggregation.is_some() {
                 self.warn(
-                    &C::EMIT_RAVENS_FIELD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                     format!("{what}: voltage aggregation setting has no MG-RAVENS slot; dropped"),
                 );
             }
@@ -1460,7 +1460,7 @@ impl Writer {
                 // as one ideal source per conductor; the neutral, the
                 // Thevenin impedance, and the other extras ride on the first.
                 self.warn(
-                    &C::EMIT_RAVENS_SOURCE_SPLIT,
+                    &C::EMIT_RAVENS_DIST_SOURCE_SPLIT,
                     format!(
                         "{what}: the per terminal magnitudes or angles are not one balanced \
                          positive sequence set, and an MG-RAVENS EnergySource states one \
@@ -1591,7 +1591,7 @@ impl Writer {
             let what = format!("transformer {}", xf.name);
             if xf.windings.len() < 2 {
                 self.warn(
-                    &C::EMIT_RAVENS_RECORD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
                     format!("{what}: fewer than two windings; skipped"),
                 );
                 continue;
@@ -1693,7 +1693,7 @@ impl Writer {
                 }
                 if (w.tap - 1.0).abs() > 0.0 {
                     self.warn(
-                        &C::EMIT_RAVENS_FIELD_DROPPED,
+                        &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                         format!(
                             "{what}: winding {num} tap {} is dropped (tap changers are read from \
                          RAVENS documents but not synthesized into them)",
@@ -1740,7 +1740,7 @@ impl Writer {
                 }
                 if xf.xsc_pct.len() > 1 {
                     self.warn(
-                        &C::EMIT_RAVENS_VALUE_COLLAPSED,
+                        &C::EMIT_RAVENS_DIST_VALUE_COLLAPSED,
                         format!(
                             "{what}: only the first winding pair's short-circuit reactance is \
                          carried; the document format does not encode the remaining pairs"
@@ -1837,7 +1837,7 @@ impl Writer {
             ] {
                 if value {
                     self.warn(
-                        &C::EMIT_RAVENS_FIELD_DROPPED,
+                        &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                         format!(
                             "bus {}: {field} voltage bound family has no MG-RAVENS slot; dropped",
                             bus.id
@@ -1864,7 +1864,7 @@ impl Writer {
                 letters.dedup();
                 if !unspelled.is_empty() {
                     self.warn(
-                        &C::EMIT_RAVENS_FIELD_DROPPED,
+                        &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                         format!(
                             "bus {}: grounded terminal(s) {unspelled:?} have no MG-RAVENS phase \
                          letter; {}",
@@ -1934,7 +1934,7 @@ impl Writer {
             };
             let (Some(path), Some(raw)) = (prop("ravens_path"), prop("ravens_json")) else {
                 self.warn(
-                    &C::EMIT_RAVENS_RECORD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
                     format!(
                         "untyped {} {}: no MG-RAVENS representation; dropped",
                         u.class, u.name
@@ -1944,7 +1944,7 @@ impl Writer {
             };
             let Ok(value) = serde_json::from_str::<Value>(raw) else {
                 self.warn(
-                    &C::EMIT_RAVENS_RECORD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
                     format!(
                         "untyped {} {}: preserved JSON no longer parses; dropped",
                         u.class, u.name
@@ -1955,7 +1955,7 @@ impl Writer {
             let keys: Vec<&str> = path.split('/').filter(|k| !k.is_empty()).collect();
             if let Err(why) = insert_at(root, &keys, u.name.clone(), value) {
                 self.warn(
-                    &C::EMIT_RAVENS_RECORD_DROPPED,
+                    &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
                     format!("untyped {} {}: {why}; dropped", u.class, u.name),
                 );
             }
@@ -1965,7 +1965,7 @@ impl Writer {
     fn warn_unrepresented(&mut self, net: &MulticonductorNetwork) {
         if let Some(name) = net.name() {
             self.warn(
-                &C::EMIT_RAVENS_FIELD_DROPPED,
+                &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                 format!(
                     "network name `{name}` has no MG-RAVENS slot (the document carries no \
                  circuit record); dropped"
@@ -1975,7 +1975,7 @@ impl Writer {
         #[allow(clippy::float_cmp)] // the default is the exact literal 60.0
         if net.base_frequency() != crate::dss::defaults::BASE_FREQUENCY {
             self.warn(
-                &C::EMIT_RAVENS_FIELD_DROPPED,
+                &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                 format!(
                     "base frequency {} Hz has no MG-RAVENS slot; a reparse assumes 60 Hz \
                  (admittances are stored in siemens, so the model is unaffected)",
@@ -1985,20 +1985,20 @@ impl Writer {
         }
         if net.geo().is_some() {
             self.warn(
-                &C::EMIT_RAVENS_FIELD_DROPPED,
+                &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
                 "coordinate-space metadata has no MG-RAVENS slot; bus positions are emitted \
                  as bare PositionPoints",
             );
         }
         for (verb, args) in net.commands().iter().chain(net.options()) {
             self.warn(
-                &C::EMIT_RAVENS_RECORD_DROPPED,
+                &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
                 format!("source command `{verb} {args}` has no MG-RAVENS representation; dropped"),
             );
         }
         for profile in net.control_profiles() {
             self.warn(
-                &C::EMIT_RAVENS_RECORD_DROPPED,
+                &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
                 format!(
                     "control profile {}: inverter control curves have no MG-RAVENS slot; dropped",
                     profile.name

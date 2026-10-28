@@ -53,8 +53,6 @@ pub enum TransmissionFormat {
     Gridfm,
     Goc3Json,
     SurgeJson,
-    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema, balanced profile.
-    RavensJson,
     DeepMindOpfDataJson,
     Xiidm,
     Jiidm,
@@ -64,6 +62,8 @@ pub enum TransmissionFormat {
     IeeeCdf,
     /// Explicit positive-sequence profile of the two-family SINCAL container.
     SincalBalanced,
+    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema, balanced profile.
+    RavensJson,
 }
 
 impl TransmissionFormat {

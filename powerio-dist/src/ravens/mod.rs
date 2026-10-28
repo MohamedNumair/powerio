@@ -25,8 +25,8 @@
 //! read, write is byte stable; a parse retains its source on the module for
 //! the byte-exact echo tier.
 //!
-//! The reader's findings use the `READ.RAVENS.*` codes and the writer's the
-//! `EMIT.RAVENS.*` codes of [`crate::diagnostics`]. The vocabulary the two
+//! The reader's findings use the `READ.RAVENS_DIST.*` codes and the writer's the
+//! `EMIT.RAVENS_DIST.*` codes of [`crate::diagnostics`]. The vocabulary the two
 //! profiles share (the profile markers, deterministic mRIDs, and the phase
 //! kinds) is [`powerio_core::cim`]; the balanced profile is read and written
 //! by `powerio-tx`, and `powerio-tnd` routes a document to its profile.

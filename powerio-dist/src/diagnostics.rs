@@ -395,37 +395,37 @@ pub mod codes {
 
         // READ.RAVENS: the multiconductor MG-RAVENS profile decoded, but
         // not representable in the model as stated.
-        READ_RAVENS_CLASS_UNMAPPED = "READ.RAVENS.CLASS_UNMAPPED", Warning,
+        READ_RAVENS_DIST_CLASS_UNMAPPED = "READ.RAVENS_DIST.CLASS_UNMAPPED", Warning,
             "MG-RAVENS objects of a class the distribution mapping does not read were kept untyped";
-        READ_RAVENS_FIELD_UNMAPPED = "READ.RAVENS.FIELD_UNMAPPED", Warning,
+        READ_RAVENS_DIST_FIELD_UNMAPPED = "READ.RAVENS_DIST.FIELD_UNMAPPED", Warning,
             "a property of a mapped MG-RAVENS object has no model field and was not carried";
-        READ_RAVENS_RECORD_DROPPED = "READ.RAVENS.RECORD_DROPPED", Warning,
+        READ_RAVENS_DIST_RECORD_DROPPED = "READ.RAVENS_DIST.RECORD_DROPPED", Warning,
             "an MG-RAVENS equipment record could not be mapped and was kept untyped";
-        READ_RAVENS_VALUE_DEFAULTED = "READ.RAVENS.VALUE_DEFAULTED", Warning,
+        READ_RAVENS_DIST_VALUE_DEFAULTED = "READ.RAVENS_DIST.VALUE_DEFAULTED", Warning,
             "a value the model needs is absent from the MG-RAVENS document and was defaulted";
-        READ_RAVENS_VALUE_SUBSTITUTED = "READ.RAVENS.VALUE_SUBSTITUTED", Warning,
+        READ_RAVENS_DIST_VALUE_SUBSTITUTED = "READ.RAVENS_DIST.VALUE_SUBSTITUTED", Warning,
             "an MG-RAVENS value outside the mapped set was read as the nearest one";
-        READ_RAVENS_VALUE_COLLAPSED = "READ.RAVENS.VALUE_COLLAPSED", Warning,
+        READ_RAVENS_DIST_VALUE_COLLAPSED = "READ.RAVENS_DIST.VALUE_COLLAPSED", Warning,
             "MG-RAVENS structure was reduced to what one model field can carry";
-        READ_RAVENS_VALUE_CONFLICT = "READ.RAVENS.VALUE_CONFLICT", Warning,
+        READ_RAVENS_DIST_VALUE_CONFLICT = "READ.RAVENS_DIST.VALUE_CONFLICT", Warning,
             "two MG-RAVENS statements of one value disagree and the first was kept";
-        READ_RAVENS_RETAINED_SOURCE_ONLY = "READ.RAVENS.RETAINED_SOURCE_ONLY", Warning,
+        READ_RAVENS_DIST_RETAINED_SOURCE_ONLY = "READ.RAVENS_DIST.RETAINED_SOURCE_ONLY", Warning,
             "an MG-RAVENS object survives untyped: it round-trips to MG-RAVENS and is dropped elsewhere";
 
         // EMIT.RAVENS: what the multiconductor MG-RAVENS writer cannot state.
-        EMIT_RAVENS_FIELD_DROPPED = "EMIT.RAVENS.FIELD_DROPPED", Warning,
+        EMIT_RAVENS_DIST_FIELD_DROPPED = "EMIT.RAVENS_DIST.FIELD_DROPPED", Warning,
             "a field MG-RAVENS has no property for was dropped";
-        EMIT_RAVENS_RECORD_DROPPED = "EMIT.RAVENS.RECORD_DROPPED", Warning,
+        EMIT_RAVENS_DIST_RECORD_DROPPED = "EMIT.RAVENS_DIST.RECORD_DROPPED", Warning,
             "an element the MG-RAVENS writer does not emit was dropped";
-        EMIT_RAVENS_EXTRAS_DROPPED = "EMIT.RAVENS.EXTRAS_DROPPED", Warning,
+        EMIT_RAVENS_DIST_EXTRAS_DROPPED = "EMIT.RAVENS_DIST.EXTRAS_DROPPED", Warning,
             "a passthrough extra with no MG-RAVENS property was dropped";
-        EMIT_RAVENS_VALUE_COLLAPSED = "EMIT.RAVENS.VALUE_COLLAPSED", Warning,
+        EMIT_RAVENS_DIST_VALUE_COLLAPSED = "EMIT.RAVENS_DIST.VALUE_COLLAPSED", Warning,
             "structure was reduced to what one MG-RAVENS property can carry";
-        EMIT_RAVENS_VALUE_SUBSTITUTED = "EMIT.RAVENS.VALUE_SUBSTITUTED", Warning,
+        EMIT_RAVENS_DIST_VALUE_SUBSTITUTED = "EMIT.RAVENS_DIST.VALUE_SUBSTITUTED", Warning,
             "a stated value was replaced by one MG-RAVENS can hold";
-        EMIT_RAVENS_NOT_A_NUMBER = "EMIT.RAVENS.NOT_A_NUMBER", Warning,
+        EMIT_RAVENS_DIST_NOT_A_NUMBER = "EMIT.RAVENS_DIST.NOT_A_NUMBER", Warning,
             "a non-finite value was written as 0, because JSON has no Inf or NaN";
-        EMIT_RAVENS_SOURCE_SPLIT = "EMIT.RAVENS.SOURCE_SPLIT", Warning,
+        EMIT_RAVENS_DIST_SOURCE_SPLIT = "EMIT.RAVENS_DIST.SOURCE_SPLIT", Warning,
             "an unbalanced source is written as one single phase EnergySource per phase conductor, with the same terminal phasors";
 
         // EMIT.CIM_DIST: what the distribution CIM writer cannot state.

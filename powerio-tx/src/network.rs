@@ -1408,10 +1408,6 @@ pub enum SourceFormat {
     /// Read from a Surge native JSON document.
     #[serde(rename = "surge-json")]
     SurgeJson,
-    /// Read from an MG-RAVENS JSON document (the LANL CIM-derived interchange
-    /// schema), balanced subset.
-    #[serde(rename = "ravens-json")]
-    RavensJson,
     /// Read from one raw JSON document in a DeepMind OPFData release. The
     /// source carries both solver initial values and a solution. The balanced
     /// model represents the solved snapshot and retains the source for an
@@ -1438,6 +1434,10 @@ pub enum SourceFormat {
     /// A SINCAL project read using the explicitly selected balanced profile.
     #[serde(rename = "sincal")]
     Sincal,
+    /// Read from an MG-RAVENS JSON document (the LANL CIM-derived interchange
+    /// schema), balanced subset.
+    #[serde(rename = "ravens-json")]
+    RavensJson,
 }
 
 impl SourceFormat {
