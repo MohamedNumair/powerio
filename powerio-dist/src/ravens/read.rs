@@ -38,6 +38,7 @@ pub(crate) fn parse_ravens_collecting(
         format: FMT,
         message: e.to_string(),
     })?;
+    validate_shapes(&root_value)?;
     let Value::Object(root) = root_value else {
         return Err(Error::Json {
             format: FMT,
@@ -77,6 +78,129 @@ pub(crate) fn parse_ravens_collecting(
 // ---------------------------------------------------------------------------
 // Document walk
 // ---------------------------------------------------------------------------
+
+// The other distribution readers use the same ceiling for conductor
+// matrices and winding counts. Check before any dense matrix allocation.
+const MAX_MATRIX_DIM: usize = 64;
+
+fn validate_phase_code(field: &str, value: &Value) -> Result<()> {
+    let malformed = |message| Error::Json {
+        format: FMT,
+        message,
+    };
+    let code = value
+        .as_str()
+        .ok_or_else(|| malformed(format!("{field} is not a phase code")))?;
+    let suffix = kind_suffix(code);
+    // At most four physical terminals, with two characters per split-phase
+    // token. Bound before expanding strings, including malformed repeats.
+    if suffix.len() > 8 {
+        return Err(malformed(format!("{field}: phase code is too long")));
+    }
+    // The native schema also permits unspecified phases X/Y and writes the
+    // pair of split phases as s12; retain the older s1s2 spelling below.
+    if matches!(suffix, "none" | "X" | "XY" | "XN" | "XYN" | "s12" | "s12N") {
+        return Ok(());
+    }
+    let phases = super::expand_phase_code(code);
+    let mut seen = BTreeSet::new();
+    if phases.concat() != suffix
+        || phases
+            .iter()
+            .any(|p| phase_terminal(p).is_none_or(|terminal| !seen.insert(terminal)))
+    {
+        return Err(malformed(format!(
+            "{field}: invalid or repeated phase in `{code}`"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_shapes(value: &Value) -> Result<()> {
+    let malformed = |message| Error::Json {
+        format: FMT,
+        message,
+    };
+    match value {
+        Value::Object(object) => {
+            if object.get("Ravens.cimObjectType").and_then(Value::as_str)
+                == Some("PerLengthPhaseImpedance")
+            {
+                let index = |value: &Value, field: &str| -> Result<usize> {
+                    let number = value
+                        .as_f64()
+                        .filter(|n| {
+                            n.is_finite()
+                                && *n >= 1.0
+                                && *n <= MAX_MATRIX_DIM as f64
+                                && n.fract() == 0.0
+                        })
+                        .ok_or_else(|| {
+                            malformed(format!(
+                                "{field}: expected an integer in 1..={MAX_MATRIX_DIM}"
+                            ))
+                        })?;
+                    Ok(number as usize)
+                };
+                let count = object
+                    .get("PerLengthPhaseImpedance.conductorCount")
+                    .map(|v| index(v, "PerLengthPhaseImpedance.conductorCount"))
+                    .transpose()?;
+                if let Some(value) = object.get("PerLengthPhaseImpedance.PhaseImpedanceData") {
+                    let rows = value.as_array().ok_or_else(|| {
+                        malformed(
+                            "PerLengthPhaseImpedance.PhaseImpedanceData is not an array".into(),
+                        )
+                    })?;
+                    for row in rows {
+                        for field in ["PhaseImpedanceData.row", "PhaseImpedanceData.column"] {
+                            let coordinate = row.get(field).ok_or_else(|| {
+                                malformed(format!("impedance row has no {field}"))
+                            })?;
+                            let coordinate = index(coordinate, field)?;
+                            if count.is_some_and(|n| coordinate > n) {
+                                return Err(malformed(format!("{field} exceeds conductorCount")));
+                            }
+                        }
+                    }
+                }
+            }
+            for (field, child) in object {
+                if matches!(
+                    field.as_str(),
+                    "Terminal.phases"
+                        | "TransformerTankEnd.phases"
+                        | "TransformerTankEnd.orderedPhases"
+                ) {
+                    validate_phase_code(field, child)?;
+                }
+                if matches!(
+                    field.as_str(),
+                    "ACLineSegment.ACLineSegmentPhase"
+                        | "EnergyConsumer.EnergyConsumerPhase"
+                        | "Switch.SwitchPhase"
+                        | "TransformerTank.TransformerTankEnd"
+                        | "TransformerTankInfo.TransformerEndInfos"
+                ) && child
+                    .as_array()
+                    .is_some_and(|items| items.len() > MAX_MATRIX_DIM)
+                {
+                    return Err(malformed(format!(
+                        "{field} has more than {MAX_MATRIX_DIM} entries"
+                    )));
+                }
+                validate_shapes(child)?;
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                validate_shapes(item)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
 
 /// Every recorded object: its concrete `Ravens.cimObjectType`, the hash key
 /// it is filed under (the pointer-resolution name), the root-relative hash
@@ -389,6 +513,92 @@ struct Mapper<'a> {
 }
 
 impl Mapper<'_> {
+    /// Inactive equipment contributes no network equation. Retain its native
+    /// object for canonical RAVENS output instead of turning it on implicitly.
+    fn inactive(&mut self, obj: &Obj) -> bool {
+        fn unsupported_phase(value: &Value) -> bool {
+            match value {
+                Value::Object(map) => map.iter().any(|(key, v)| {
+                    (matches!(
+                        key.rsplit('.').next(),
+                        Some("phases" | "phase" | "orderedPhases" | "phaseSide1" | "phaseSide2")
+                    ) && v
+                        .as_str()
+                        .is_some_and(|s| kind_suffix(s).contains(['X', 'Y'])))
+                        || unsupported_phase(v)
+                }),
+                Value::Array(items) => items.iter().any(unsupported_phase),
+                _ => false,
+            }
+        }
+        if fbool(obj, "Equipment.inService") == Some(false) {
+            self.keep_untyped(obj, "equipment is out of service");
+            self.preserve_dependencies(obj);
+            true
+        } else if unsupported_phase(&Value::Object(obj.props.clone())) {
+            self.keep_untyped(
+                obj,
+                "unspecified X/Y phase identity has no wire-coordinate mapping",
+            );
+            self.preserve_dependencies(obj);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// An inactive equipment record still refers to catalog/response data.
+    /// Retain those native records too; otherwise canonical output would
+    /// contain dangling pointers after omitting its active typed projection.
+    fn preserve_dependencies(&mut self, obj: &Obj) {
+        fn pointers(value: &Value, out: &mut Vec<Value>) {
+            if pointer_parts(value).is_some() {
+                out.push(value.clone());
+            }
+            match value {
+                Value::Object(map) => {
+                    for v in map.values() {
+                        pointers(v, out);
+                    }
+                }
+                Value::Array(items) => {
+                    for v in items {
+                        pointers(v, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut queue = Vec::new();
+        pointers(&Value::Object(obj.props.clone()), &mut queue);
+        let mut visited = BTreeSet::new();
+        while let Some(pointer) = queue.pop() {
+            let Some(target) = self.doc.resolve(&pointer) else {
+                continue;
+            };
+            if !visited.insert((target.kind.clone(), target.name.clone())) {
+                continue;
+            }
+            pointers(&Value::Object(target.props.clone()), &mut queue);
+            if target.nested
+                || matches!(
+                    target.kind.as_str(),
+                    "ConnectivityNode" | "ACLineSegment" | "EnergySource" | "EnergyConsumer"
+                )
+            {
+                continue;
+            }
+            if !self
+                .net
+                .untyped_objects()
+                .iter()
+                .any(|u| u.class == target.kind && u.name == target.name)
+            {
+                self.push_untyped(target);
+            }
+        }
+    }
+
     fn warn(&mut self, info: &'static crate::diagnostics::DiagnosticInfo, msg: impl Into<String>) {
         self.diagnostics.push(info, msg);
     }
@@ -538,6 +748,9 @@ impl Mapper<'_> {
     fn map_lines(&mut self) {
         self.claim(&["ACLineSegment", "ACLineSegmentPhase"]);
         for obj in self.doc.sorted_of_kind("ACLineSegment") {
+            if self.inactive(obj) {
+                continue;
+            }
             let name = obj.name.clone();
             let terminals = terminal_entries(&obj.props);
             let (Some(from), Some(to)) = (terminals.first(), terminals.get(1)) else {
@@ -648,7 +861,11 @@ impl Mapper<'_> {
             // otherwise both ends share the conductor order.
             let map_to = {
                 let own = letters_to_terminals(&to.phases);
-                if !own.is_empty() && own.len() == map.len() {
+                // PhaseCode is a set, not an ordering of impedance rows.
+                // A segment phase names the same conductor at both ends.
+                if own.iter().collect::<BTreeSet<_>>() == map.iter().collect::<BTreeSet<_>>() {
+                    map.clone()
+                } else if !own.is_empty() && own.len() == map.len() {
                     own
                 } else {
                     map.clone()
@@ -686,6 +903,9 @@ impl Mapper<'_> {
             .collect();
         switches.sort_by_key(|o| natural_key(&o.name));
         for obj in switches {
+            if self.inactive(obj) {
+                continue;
+            }
             let name = obj.name.clone();
             let terminals = terminal_entries(&obj.props);
             let (Some(from), Some(to)) = (terminals.first(), terminals.get(1)) else {
@@ -718,7 +938,10 @@ impl Mapper<'_> {
                 })
                 .unwrap_or_default();
             let (map_from, map_to) = if sides.is_empty() {
-                (hot_terminals(&from.phases), hot_terminals(&to.phases))
+                (
+                    letters_to_terminals(&from.phases),
+                    letters_to_terminals(&to.phases),
+                )
             } else {
                 sides.into_iter().unzip()
             };
@@ -781,6 +1004,9 @@ impl Mapper<'_> {
             "EnergyConnectionProfile",
         ]);
         for obj in self.doc.sorted_of_kind("EnergyConsumer") {
+            if self.inactive(obj) {
+                continue;
+            }
             let name = obj.name.clone();
             let terminals = terminal_entries(&obj.props);
             let Some(at) = terminals.first() else {
@@ -852,20 +1078,49 @@ impl Mapper<'_> {
 
             let mut map: Vec<String> = per_phase.iter().map(|(t, ..)| t.clone()).collect();
             if delta && phases == 1 {
-                // A one-phase delta load spans two hot terminals; the
-                // terminal's phase code carries the pair.
+                // Native OpenDSS RAVENS labels delta branches A=AB, B=BC,
+                // C=CA. Older PowerIO output instead named both conductors
+                // on the Terminal; accept that unambiguous form as well.
                 let pair = hot_terminals(&at.phases);
                 if pair.len() == 2 {
                     map = pair;
                 } else {
-                    self.warn(
-                        &C::READ_RAVENS_DIST_RECORD_DROPPED,
-                        format!(
-                            "load {name}: single-phase delta needs a two-phase terminal code; \
-                         kept untyped"
-                        ),
-                    );
-                    self.keep_untyped(obj, "unresolvable delta terminals");
+                    map = match map.first().map(String::as_str) {
+                        Some("1") => vec!["1".into(), "2".into()],
+                        Some("2") => vec!["2".into(), "3".into()],
+                        Some("3") => vec!["3".into(), "1".into()],
+                        _ => {
+                            self.keep_untyped(obj, "unresolvable delta branch");
+                            continue;
+                        }
+                    };
+                }
+            } else if delta {
+                // Preserve phase-power array order while finding conductor
+                // order whose successive edges are the named branches.
+                let permutations = [
+                    [1, 2, 3],
+                    [1, 3, 2],
+                    [2, 1, 3],
+                    [2, 3, 1],
+                    [3, 1, 2],
+                    [3, 2, 1],
+                ];
+                let candidate = permutations.into_iter().find(|p| {
+                    per_phase.iter().enumerate().all(|(i, (label, ..))| {
+                        let (a, b) = (p[i % 3], p[(i + 1) % 3]);
+                        let branch = match (a.min(b), a.max(b)) {
+                            (1, 2) => "1",
+                            (2, 3) => "2",
+                            _ => "3",
+                        };
+                        label == branch
+                    })
+                });
+                if let Some(order) = candidate {
+                    map = order.iter().map(ToString::to_string).collect();
+                } else {
+                    self.keep_untyped(obj, "unresolvable delta branches");
                     continue;
                 }
             } else if !delta {
@@ -1010,6 +1265,9 @@ impl Mapper<'_> {
     fn map_shunts(&mut self) {
         self.claim(&["LinearShuntCompensator"]);
         for obj in self.doc.sorted_of_kind("LinearShuntCompensator") {
+            if self.inactive(obj) {
+                continue;
+            }
             let name = obj.name.clone();
             let terminals = terminal_entries(&obj.props);
             let Some(at) = terminals.first() else {
@@ -1097,6 +1355,9 @@ impl Mapper<'_> {
             .collect();
         machines.sort_by_key(|o| natural_key(&o.name));
         for obj in machines {
+            if self.inactive(obj) {
+                continue;
+            }
             let name = obj.name.clone();
             let terminals = terminal_entries(&obj.props);
             let Some(at) = terminals.first() else {
@@ -1173,6 +1434,9 @@ impl Mapper<'_> {
             "BatteryUnitEfficiency",
         ]);
         for obj in self.doc.sorted_of_kind("PowerElectronicsConnection") {
+            if self.inactive(obj) {
+                continue;
+            }
             let name = obj.name.clone();
             let terminals = terminal_entries(&obj.props);
             let Some(at) = terminals.first() else {
@@ -1291,15 +1555,26 @@ impl Mapper<'_> {
 
     // ----- sources ---------------------------------------------------------
 
+    #[allow(clippy::too_many_lines)] // phasors and the exact series equivalent are mapped together
     fn map_sources(&mut self) {
         self.claim(&["EnergySource"]);
         for obj in self.doc.sorted_of_kind("EnergySource") {
+            if self.inactive(obj) {
+                continue;
+            }
             let name = obj.name.clone();
             let terminals = terminal_entries(&obj.props);
             let Some(at) = terminals.first() else {
                 self.keep_untyped(obj, "no terminal");
                 continue;
             };
+            if terminals.len() > 1 {
+                self.keep_untyped(
+                    obj,
+                    "a non-earth source return needs a reference-terminal equivalent",
+                );
+                continue;
+            }
             let hot = hot_terminals(&at.phases);
             let hot = if hot.is_empty() {
                 self.defaulted("vsource", &name, "phases");
@@ -1356,19 +1631,84 @@ impl Mapper<'_> {
                 }
             }
             extras.insert("angle".into(), angle.to_degrees().into());
-            for (prop, key) in [
-                ("EnergySource.r", "r1"),
-                ("EnergySource.x", "x1"),
-                ("EnergySource.r0", "r0"),
-                ("EnergySource.x0", "x0"),
-            ] {
-                if let Some(v) = fnum(obj, prop) {
-                    extras.insert(key.into(), v.into());
+            self.use_terminals(&at.node, &map);
+            let mut source_bus = at.node.clone();
+            let r1 = f_or(obj, "EnergySource.r", 0.0);
+            let x1 = f_or(obj, "EnergySource.x", 0.0);
+            let r0 = f_or(obj, "EnergySource.r0", r1);
+            let x0 = f_or(obj, "EnergySource.x0", x1);
+            if [r1, x1, r0, x0].iter().any(|z| *z != 0.0) {
+                // The ideal constraint belongs behind Zabc, not at the feeder
+                // port. Z2=Z1 in the RAVENS/OpenDSS source profile, hence the
+                // diagonal (Z0+2Z1)/3 and mutual (Z0-Z1)/3, also for a subset
+                // of phases. Extras must not reapply this impedance on write.
+                let unique = |stem: String, occupied: &BTreeSet<String>| {
+                    let mut candidate = stem.clone();
+                    let mut suffix = 1;
+                    while occupied
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(&candidate))
+                    {
+                        candidate = format!("{stem}_{suffix}");
+                        suffix += 1;
+                    }
+                    candidate
+                };
+                let occupied: BTreeSet<String> = self
+                    .doc
+                    .objects
+                    .iter()
+                    .map(|o| o.name.clone())
+                    .chain(self.node_terminals.keys().cloned())
+                    .collect();
+                source_bus = unique(format!("_pio_ravens_{name}_emf"), &occupied);
+                let occupied: BTreeSet<String> = self
+                    .doc
+                    .objects
+                    .iter()
+                    .map(|o| o.name.clone())
+                    .chain(self.net.line_codes().iter().map(|c| c.name.clone()))
+                    .chain(self.net.lines().iter().map(|l| l.name.clone()))
+                    .collect();
+                let branch_name = unique(format!("_pio_ravens_{name}_impedance"), &occupied);
+                let matrix = |positive: f64, zero: f64| -> ConductorMatrix {
+                    (0..phases)
+                        .map(|i| {
+                            (0..phases)
+                                .map(|j| {
+                                    if i == j {
+                                        (zero + 2.0 * positive) / 3.0
+                                    } else {
+                                        (zero - positive) / 3.0
+                                    }
+                                })
+                                .collect()
+                        })
+                        .collect()
+                };
+                self.net.line_codes_mut().push(DistLineCode::new(
+                    &branch_name,
+                    matrix(r1, r0),
+                    matrix(x1, x0),
+                ));
+                let hot = map[..phases].to_vec();
+                self.net.lines_mut().push(DistLine::new(
+                    &branch_name,
+                    &source_bus,
+                    &at.node,
+                    hot.clone(),
+                    hot,
+                    &branch_name,
+                    1.0,
+                ));
+                self.net
+                    .buses_mut()
+                    .push(DistBus::new(&source_bus, map.clone()));
+                if map.len() > phases {
+                    self.ground_node(&at.node);
                 }
             }
-
-            self.use_terminals(&at.node, &map);
-            let mut source = VoltageSource::new(name, at.node.clone(), map, v_magnitude, v_angle);
+            let mut source = VoltageSource::new(name, source_bus, map, v_magnitude, v_angle);
             source.extras = extras;
             self.net.sources_mut().push(source);
         }
@@ -1393,6 +1733,34 @@ impl Mapper<'_> {
         let mut tanks: Vec<&Obj> = self.doc.of_kind("TransformerTank").collect();
         tanks.sort_by_key(|o| natural_key(&o.name));
         for tank in tanks {
+            let inactive_parent = self.doc.of_kind("PowerTransformer").find(|p| {
+                fbool(p, "Equipment.inService") == Some(false)
+                    && (p.name == tank.name
+                        || p.props
+                            .get("PowerTransformer.TransformerTank")
+                            .and_then(Value::as_array)
+                            .is_some_and(|tanks| {
+                                tanks.iter().any(|t| {
+                                    t.get("IdentifiedObject.name").and_then(Value::as_str)
+                                        == Some(tank.name.as_str())
+                                })
+                            }))
+            });
+            if let Some(parent) = inactive_parent {
+                if !self
+                    .net
+                    .untyped_objects()
+                    .iter()
+                    .any(|u| u.class == parent.kind && u.name == parent.name)
+                {
+                    self.keep_untyped(parent, "equipment is out of service");
+                    self.preserve_dependencies(parent);
+                }
+                continue;
+            }
+            if self.inactive(tank) {
+                continue;
+            }
             let name = tank.name.clone();
             let info_name = tank
                 .props
@@ -1565,7 +1933,7 @@ impl Mapper<'_> {
                             winding.r_neutral = Some(rg);
                             winding.x_neutral = Some(xg);
                         }
-                        if map.contains(&"4".to_owned()) {
+                        if rg == 0.0 && xg == 0.0 && map.contains(&"4".to_owned()) {
                             self.ground_node(&node);
                         }
                     } else {
@@ -1764,6 +2132,10 @@ impl Mapper<'_> {
                 .get(&obj.name)
                 .map(|set| set.iter().map(u8::to_string).collect())
                 .unwrap_or_default();
+            if terminals.is_empty() {
+                self.keep_untyped(obj, "no active equipment states any conductor at this node");
+                continue;
+            }
             let mut bus = DistBus::new(obj.name.clone(), terminals);
             bus.grounded = self.grounded_terminals(&obj.name);
             if let Some(set) = obj
@@ -1825,6 +2197,9 @@ impl Mapper<'_> {
     fn map_grounds(&mut self) {
         self.claim(&["Ground"]);
         for obj in self.doc.sorted_of_kind("Ground") {
+            if self.inactive(obj) {
+                continue;
+            }
             let terminals = terminal_entries(&obj.props);
             let Some(at) = terminals.first() else {
                 self.keep_untyped(obj, "no terminal");

@@ -190,6 +190,17 @@ for stay untyped at their source paths and are written back there. Writing
 is byte stable: a document written, read, and written again is identical.
 `tests/data/dist/ravens/` holds the vendored example (Apache-2.0).
 
+The RAVENS schema CI gate validates regenerated output after a PowerIO IR
+round trip against the pinned upstream schema generator. Distribution output
+uses the unmodified schema. The upstream balanced MATPOWER converter emits
+two fields its own schema omits: `ConnectivityNode.SvVoltage` and `MySettings`.
+Balanced output is checked against that schema with a strict supplement for
+these two fields. The report distinguishes these profiles, lists every case
+and diagnostic, and includes controls that reject malformed output. See
+[`evals/validation/ravens/`](https://github.com/eigenergy/powerio/tree/main/evals/validation/ravens)
+for the revision, commands, and scope; schema validity alone does not establish
+electrical equivalence.
+
 ## PowerModelsDistribution MATHEMATICAL model
 
 `pmd-math-json` is the PowerModelsDistribution MATHEMATICAL model, the per
@@ -213,7 +224,7 @@ rating, since the MATHEMATICAL model carries no winding power rating, and
 says so. A load without a nominal voltage and an island no stated base
 reaches are written with a stated default and a finding where PMD's own
 functions would stop. `tests/data/dist/pmd/math/` holds PMD v0.16 exports of
-four of its own cases, ENGINEERING and MATHEMATICAL side by side, which the
+five of its own cases, ENGINEERING and MATHEMATICAL side by side, which the
 tests compare the writer against field by field.
 
 ## Distribution CIM

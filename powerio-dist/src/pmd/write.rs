@@ -40,6 +40,14 @@ pub(crate) fn emit_pmd_json_text(net: &MulticonductorNetwork) -> TextEmission {
             .unwrap_or_default(),
         retained,
     };
+    for key in ["bmopf_meta", "pmd_math_top_level"] {
+        if net.extras().contains_key(key) {
+            w.warn(
+                &C::EMIT_PMD_FIELD_DROPPED,
+                format!("network: retained `{key}` metadata is not emitted to ENGINEERING"),
+            );
+        }
+    }
     for source in net
         .sources()
         .iter()
@@ -723,7 +731,12 @@ impl Writer {
                     json!(format!("line.{}", l.name.to_lowercase())),
                 );
                 self.time_series_refs(&l.extras, &mut o, &what);
-                self.extras_dropped(&l.extras, &["units"], &what);
+                for (key, math_key) in [("vad_lb", "pmd_angmin"), ("vad_ub", "pmd_angmax")] {
+                    if let Some(bounds) = l.extras.get(math_key).or_else(|| l.extras.get(key)) {
+                        o.insert(key.into(), bounds.clone());
+                    }
+                }
+                self.extras_dropped(&l.extras, &["units", "vad_lb", "vad_ub"], &what);
                 lines.insert(l.name.to_lowercase(), Value::Object(o));
             }
             doc.insert("line".into(), Value::Object(lines));
@@ -763,10 +776,18 @@ impl Writer {
                     .cloned()
                     .unwrap_or_else(|| matrix(&zero_matrix(n)));
                 o.insert("xs".into(), xs);
-                o.insert("g_fr".into(), matrix(&zero_matrix(n)));
-                o.insert("g_to".into(), matrix(&zero_matrix(n)));
-                o.insert("b_fr".into(), matrix(&zero_matrix(n)));
-                o.insert("b_to".into(), matrix(&zero_matrix(n)));
+                for key in ["g_fr", "g_to", "b_fr", "b_to"] {
+                    o.insert(
+                        key.into(),
+                        s.extras
+                            .get(&format!("pmd_{key}"))
+                            .cloned()
+                            .unwrap_or_else(|| matrix(&zero_matrix(n))),
+                    );
+                }
+                if let Some(length) = s.extras.get("pmd_length") {
+                    o.insert("length".into(), length.clone());
+                }
                 if let Some(i_max) = &s.i_max {
                     o.insert("cm_ub".into(), json!(i_max));
                 }

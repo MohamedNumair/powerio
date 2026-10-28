@@ -2870,7 +2870,19 @@ fn classify(t: &DistTransformer) -> Kind {
                 DistWindingConn::Wye,
                 DistWindingConn::Wye,
             ],
-        ) => Kind::CenterTap,
+        ) => {
+            // The compact center-tap subtype has one shared secondary
+            // leakage arm, so its two primary-to-secondary tests must
+            // agree. Keep unequal tests (including explicit zero) in the
+            // general pair table instead of silently symmetrizing them.
+            let xhl = t.xsc_pct.first().copied().unwrap_or(0.0);
+            let xht = t.xsc_pct.get(1).copied().unwrap_or(xhl);
+            if (xhl - xht).abs() > 0.0 {
+                Kind::NWinding
+            } else {
+                Kind::CenterTap
+            }
+        }
         (3, [DistWindingConn::Wye, DistWindingConn::Delta]) => Kind::WyeDelta,
         (3, [DistWindingConn::Delta, DistWindingConn::Wye]) => Kind::DeltaWye,
         // The decomposition indexes terminal_map[phase] and takes the last

@@ -680,6 +680,7 @@ pub(crate) fn emit_value_text_with_options(
         }
         DistTargetFormat::PmdJson => crate::pmd::emit_pmd_json_text(net),
         DistTargetFormat::PmdMathJson => {
+            crate::pmd::math::write::validate_emission(net)?;
             crate::pmd::math::write::emit_pmd_math_json_text(net, &options.pmd_math)
         }
         DistTargetFormat::CimDist => crate::cim::emit_cim_dist_text(net),

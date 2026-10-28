@@ -689,7 +689,6 @@ enum FormatArg {
         alias = "gridopt"
     )]
     DeepMindOpfDataJson,
-    /// Parse a gridfm-datakit Parquet dataset directory (parse only).
     /// MG-RAVENS JSON, the LANL CIM-derived interchange schema (read and write).
     #[value(name = "ravens-json", alias = "ravens", alias = "mg-ravens")]
     RavensJson,
@@ -3645,6 +3644,18 @@ fn parse_family_case(input: &Path, from: Option<FormatArg>) -> anyhow::Result<Fa
 /// keeping the file stem as the name hint the path-based parsers would use.
 fn parse_classified_case(case: &cases::ClassifiedCase, input: &Path) -> anyhow::Result<FamilyCase> {
     match case.format {
+        DetectedFormat::Transmission(
+            powerio_tx::format::routing::TransmissionFormat::RavensJson,
+        )
+        | DetectedFormat::Distribution(
+            powerio_tx::format::routing::DistributionFormat::RavensJson,
+        ) => {
+            let source = powerio_core::Source::from_memory(
+                input.to_string_lossy().into_owned(),
+                case.text.as_bytes().to_vec(),
+            )?;
+            module_family_case(input, powerio::parse(source)?)
+        }
         DetectedFormat::Distribution(_) => {
             // The shared classifier routes the family; the dist crate owns
             // which documents are cases at all, and its rule is stricter
@@ -3986,6 +3997,25 @@ mod tests {
             text.contains("not a recognized distribution document"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn family_case_reads_balanced_ravens_with_an_empty_asset_catalog() {
+        let original = powerio::parse(powerio::Source::open(data("case9.m")).unwrap()).unwrap();
+        let text = crate::module_io::emit_module(&original, "ravens-json")
+            .unwrap()
+            .text;
+        let mut doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+        doc["AssetInfo"] = serde_json::json!({});
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("balanced.json");
+        std::fs::write(&path, doc.to_string()).unwrap();
+        for from in [None, Some(FormatArg::RavensJson)] {
+            match parse_family_case(&path, from).unwrap() {
+                FamilyCase::Transmission(module) => assert_eq!(module.value().buses().len(), 9),
+                FamilyCase::Distribution(_) => panic!("an empty asset catalog changed the family"),
+            }
+        }
     }
 
     #[test]

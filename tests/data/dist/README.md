@@ -144,13 +144,13 @@ entry, an absolute path into the local Julia depot, with the package relative
 | File | Lines | Bytes |
 |---|---|---|
 | `case3_balanced_math.json` | 803 | 13,815 |
-| `case3_balanced_cap_eng.json` | 515 | 8,409 |
+| `case3_balanced_cap_eng.json` | 515 | 8,349 |
 | `case3_balanced_cap_math.json` | 857 | 14,657 |
-| `case3_unbalanced_switch_eng.json` | 723 | 11,830 |
+| `case3_unbalanced_switch_eng.json` | 723 | 11,770 |
 | `case3_unbalanced_switch_math.json` | 1,292 | 22,125 |
-| `case3_unbalanced_ZIPloads_eng.json` | 526 | 8,510 |
+| `case3_unbalanced_ZIPloads_eng.json` | 526 | 8,450 |
 | `case3_unbalanced_ZIPloads_math.json` | 1,031 | 18,089 |
-| `ut_trans_2w_yy_eng.json` | 651 | 11,000 |
+| `ut_trans_2w_yy_eng.json` | 651 | 10,940 |
 | `ut_trans_2w_yy_math.json` | 1,601 | 26,993 |
 
 ## ravens/

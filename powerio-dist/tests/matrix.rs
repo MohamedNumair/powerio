@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use powerio_dist::{DistLoadVoltageModel, DistTargetFormat, MulticonductorNetwork, Result};
 
+#[path = "helpers/electrical_projection.rs"]
+mod electrical_projection;
 mod helpers;
 #[path = "helpers/source_equivalents.rs"]
 mod source_equivalents;
@@ -913,19 +915,15 @@ fn canonical_writers_preserve_electrical_equivalents() {
 fn ravens_writer_idempotent_across_fixtures() {
     for case in CASES {
         let net = parse_case(case);
-        // CIM SinglePhaseKind names only four conductor identities (A/B/C/N),
-        // so a linecode with more conductors has no phase representation for
-        // the extra conductors and cannot round-trip. Skip loudly rather than
-        // silently: the writer drops such a segment with a finding.
-        if let Some(code) = net.line_codes().iter().find(|c| c.n_conductors > 4) {
-            eprintln!(
-                "skipping {} -> RAVENS idempotence: linecode {} has {} conductors (> 4 CIM \
-                 phase identities)",
-                case.label, code.name, code.n_conductors
-            );
-            continue;
-        }
         let first = helpers::emit_value(&net, Fmt::Ravens.target());
+        let (expected, projection_problems) =
+            electrical_projection::ravens_projection(&net, &first.diagnostics);
+        assert!(
+            projection_problems.is_empty(),
+            "{}: {}",
+            case.label,
+            projection_problems.join("; ")
+        );
         let reparsed = Fmt::Ravens.parse_emission(&first).unwrap_or_else(|e| {
             panic!(
                 "{} -> {}: reparse failed: {e}",
@@ -933,6 +931,21 @@ fn ravens_writer_idempotent_across_fixtures() {
                 Fmt::Ravens.name()
             )
         });
+        // Unsupported-conductor cases still check the surviving circuit and
+        // canonical stability; a diagnostic is not a reason to skip a case.
+        if expected.lines().len() != net.lines().len()
+            || expected.loads().len() != net.loads().len()
+        {
+            let before = source_equivalents::contract_source_pairs(&expected);
+            let after = source_equivalents::contract_source_pairs(&reparsed);
+            let differences = electrical_projection::differences(&before, &after);
+            assert!(
+                differences.is_empty(),
+                "{}: {}",
+                case.label,
+                differences.join("; ")
+            );
+        }
         let second = helpers::emit_value(&reparsed, Fmt::Ravens.target());
         if first.text != second.text {
             let (a, b): (Vec<&str>, Vec<&str>) =

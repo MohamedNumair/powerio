@@ -82,6 +82,9 @@ pub(crate) fn parse_pmd_math_collecting(
                 .into(),
         });
     }
+    validate_shapes(&doc)?;
+    validate_bases(&doc)?;
+    validate_indices(&doc)?;
     let mut reader = Reader::new(&doc);
     reader.run();
     let net = reader.net;
@@ -93,6 +96,259 @@ pub(crate) fn parse_pmd_math_collecting(
 // ---------------------------------------------------------------------------
 // Document access
 // ---------------------------------------------------------------------------
+
+/// A stated base must be usable for both dimensionalization and division.
+/// Missing bases retain the documented defaults; invalid stated ones must
+/// not silently turn impedances into zero or change the unit system.
+fn validate_bases(doc: &Map<String, Value>) -> Result<()> {
+    let positive = |value: &Value, path: String| -> Result<()> {
+        if value.as_f64().is_some_and(|v| v.is_finite() && v > 0.0) {
+            Ok(())
+        } else {
+            Err(Error::Json {
+                format: FMT,
+                message: format!("{path} must be a finite positive number"),
+            })
+        }
+    };
+    if let Some(settings) = doc.get("settings").and_then(Value::as_object) {
+        for key in [
+            "sbase",
+            "sbase_default",
+            "voltage_scale_factor",
+            "power_scale_factor",
+        ] {
+            if let Some(value) = settings.get(key) {
+                positive(value, format!("settings.{key}"))?;
+            }
+        }
+        if let Some(bases) = settings.get("vbases_default").and_then(Value::as_object) {
+            for (key, value) in bases {
+                positive(value, format!("settings.vbases_default.{key}"))?;
+            }
+        }
+    }
+    for (table, fields) in [
+        ("bus", &["vbase"][..]),
+        ("transformer", &["f_vbase", "t_vbase"][..]),
+    ] {
+        if let Some(objects) = doc.get(table).and_then(Value::as_object) {
+            for (id, object) in objects {
+                for key in fields {
+                    if let Some(value) = object.get(*key) {
+                        positive(value, format!("{table}.{id}.{key}"))?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn integer(value: &Value) -> Option<i64> {
+    value.as_i64().or_else(|| {
+        let f = value.as_f64()?;
+        (f.is_finite() && f.fract() == 0.0 && f >= i64::MIN as f64 && f < -(i64::MIN as f64))
+            .then_some(f as i64)
+    })
+}
+
+/// Bus references are identities. Truncating 1.9 to 1 rewires the network.
+fn validate_indices(doc: &Map<String, Value>) -> Result<()> {
+    for table in [
+        "bus",
+        "branch",
+        "switch",
+        "transformer",
+        "gen",
+        "load",
+        "shunt",
+        "storage",
+    ] {
+        if let Some(objects) = doc.get(table).and_then(Value::as_object) {
+            for (id, object) in objects {
+                for key in [
+                    "index",
+                    "bus_i",
+                    "f_bus",
+                    "t_bus",
+                    "gen_bus",
+                    "load_bus",
+                    "shunt_bus",
+                    "storage_bus",
+                ] {
+                    if let Some(value) = object.get(key)
+                        && integer(value).is_none()
+                    {
+                        return Err(Error::Json {
+                            format: FMT,
+                            message: format!(
+                                "{table}.{id}.{key} must be an integer in the signed 64-bit range"
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// Match the ENGINEERING reader's bound: conductor matrices and transformer
+// loss models allocate quadratically in these dimensions.
+pub(super) const MAX_MATRIX_DIM: usize = 64;
+
+/// Check stashed matrices too: the ENGINEERING reader retains switch and
+/// source matrices as raw extras, so canonical emission meets the same input.
+pub(super) fn matrix_dimension(value: &Value) -> Option<usize> {
+    let columns = value.as_array()?;
+    let n = columns.len();
+    if !(1..=MAX_MATRIX_DIM).contains(&n)
+        || !columns.iter().all(|column| {
+            column.as_array().is_some_and(|values| {
+                values.len() == n && values.iter().all(|v| v.is_number() || v.is_null())
+            })
+        })
+    {
+        return None;
+    }
+    Some(n)
+}
+
+fn validate_shapes(doc: &Map<String, Value>) -> Result<()> {
+    validate_phase_vectors(doc)?;
+    let malformed = |message| Error::Json {
+        format: FMT,
+        message,
+    };
+    for (table, keys) in [
+        (
+            "branch",
+            &["br_r", "br_x", "g_fr", "g_to", "b_fr", "b_to"][..],
+        ),
+        ("shunt", &["gs", "bs"][..]),
+    ] {
+        let Some(objects) = doc.get(table).and_then(Value::as_object) else {
+            continue;
+        };
+        for (id, object) in objects {
+            let mut dimension = None;
+            for key in keys {
+                let Some(value) = object.get(*key) else {
+                    continue;
+                };
+                let Some(columns) = value.as_array() else {
+                    return Err(malformed(format!(
+                        "{table}.{id}.{key} is not an array of columns"
+                    )));
+                };
+                let n = columns.len();
+                if n == 0 || n > MAX_MATRIX_DIM {
+                    return Err(malformed(format!(
+                        "{table}.{id}.{key}: matrix dimension {n} is outside 1..={MAX_MATRIX_DIM}"
+                    )));
+                }
+                if matrix_dimension(value).is_none() {
+                    return Err(malformed(format!(
+                        "{table}.{id}.{key}: expected a square {n} by {n} numeric matrix"
+                    )));
+                }
+                if dimension.is_some_and(|expected| n != expected) {
+                    return Err(malformed(format!(
+                        "{table}.{id}.{key}: matrix dimensions disagree"
+                    )));
+                }
+                dimension = Some(n);
+            }
+            if let Some(n) = dimension {
+                for key in ["connections", "f_connections", "t_connections"] {
+                    if let Some(connections) = object.get(key)
+                        && connections.as_array().is_none_or(|a| a.len() != n)
+                    {
+                        return Err(malformed(format!(
+                            "{table}.{id}.{key}: connection count does not match matrix dimension {n}"
+                        )));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(entries) = doc.get("map").and_then(Value::as_array) {
+        for entry in entries {
+            if entry.get("unmap_function").and_then(Value::as_str)
+                == Some("_map_math2eng_transformer!")
+                && let Some(ids) = entry.get("to").and_then(Value::as_array)
+                && ids
+                    .iter()
+                    .filter(|id| id.as_str().is_some_and(|s| s.starts_with("transformer.")))
+                    .count()
+                    > MAX_MATRIX_DIM
+            {
+                return Err(malformed(format!(
+                    "transformer map has more than {MAX_MATRIX_DIM} winding units"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_phase_vectors(doc: &Map<String, Value>) -> Result<()> {
+    for table in [
+        "bus",
+        "branch",
+        "switch",
+        "transformer",
+        "gen",
+        "load",
+        "shunt",
+    ] {
+        let Some(objects) = doc.get(table).and_then(Value::as_object) else {
+            continue;
+        };
+        for (id, object) in objects {
+            for key in [
+                "terminals",
+                "connections",
+                "f_connections",
+                "t_connections",
+                "grounded",
+                "pd",
+                "qd",
+                "pg",
+                "qg",
+                "pmin",
+                "pmax",
+                "qmin",
+                "qmax",
+                "vm",
+                "va",
+                "vmin",
+                "vmax",
+                "vg",
+                "tm_set",
+                "tm_fix",
+                "tm_lb",
+                "tm_ub",
+                "tm_step",
+            ] {
+                if object
+                    .get(key)
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| a.len() > MAX_MATRIX_DIM)
+                {
+                    return Err(Error::Json {
+                        format: FMT,
+                        message: format!(
+                            "{table}.{id}.{key}: phase vector exceeds {MAX_MATRIX_DIM} entries"
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 /// A MATHEMATICAL object: its table, index key, and fields.
 #[derive(Clone)]
@@ -124,9 +380,7 @@ impl Obj<'_> {
     }
 
     fn int(&self, key: &str) -> Option<i64> {
-        self.fields
-            .get(key)
-            .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+        self.fields.get(key).and_then(integer)
     }
 
     fn index(&self, key: &str) -> Option<String> {
@@ -168,8 +422,9 @@ impl Obj<'_> {
 
     /// A matrix as PMD serializes it: an array of columns.
     fn matrix(&self, key: &str) -> Option<ConductorMatrix> {
-        let cols = self.fields.get(key)?.as_array()?;
-        let n = cols.len();
+        let value = self.fields.get(key)?;
+        let n = matrix_dimension(value)?;
+        let cols = value.as_array()?;
         let mut m = vec![vec![0.0; n]; n];
         for (j, col) in cols.iter().enumerate() {
             for (i, x) in col.as_array()?.iter().enumerate().take(n) {
@@ -400,6 +655,10 @@ impl<'a> Reader<'a> {
                 b.grounded.push("4".to_owned());
             }
         }
+        self.net.extras_mut().insert(
+            "bmopf_terminal_conventions".into(),
+            json!({"neutral": ["4"]}),
+        );
     }
 
     fn bus_id(&mut self, key: &str, what: &str) -> String {
@@ -417,6 +676,7 @@ impl<'a> Reader<'a> {
 
     fn run(&mut self) {
         self.extras();
+        self.neutral_roles();
         self.buses();
         let map = std::mem::take(&mut self.map);
         for entry in &map {
@@ -506,6 +766,23 @@ impl<'a> Reader<'a> {
 
     // ----- buses ------------------------------------------------------------------
 
+    fn neutral_roles(&mut self) {
+        // PMD's grounded terminal 4 is a neutral even on a single-phase
+        // bus such as [3,4]. DistBus's fallback only recognizes the complete
+        // four-wire [1,2,3,4] spelling, so retain the explicit role as well.
+        if self.table("bus").iter().any(|bus| {
+            bus.connections("terminals")
+                .iter()
+                .zip(bus.bools("grounded"))
+                .any(|(terminal, grounded)| terminal == "4" && grounded)
+        }) {
+            self.net.extras_mut().insert(
+                "bmopf_terminal_conventions".into(),
+                json!({"neutral": ["4"]}),
+            );
+        }
+    }
+
     fn buses(&mut self) {
         // The virtual buses of transformers, switches, and sources are read
         // by their groups; the rest are the network's buses.
@@ -590,16 +867,20 @@ impl<'a> Reader<'a> {
                 extras,
                 ..DistBus::default()
             };
-            let phases = out.phase_indices(None);
+            let phases = out.phase_indices(self.net.extras().get("bmopf_terminal_conventions"));
             let bound = |key: &str, open: f64| -> (Option<f64>, Option<Vec<f64>>) {
                 let values = bus.floats(key);
                 let phase_values: Vec<f64> = phases
                     .iter()
                     .filter_map(|&i| values.get(i).copied())
-                    .filter(|v| v.is_finite() && (v - open).abs() > 0.0)
                     .map(|v| self.volts(&bus.key, v))
                     .collect();
-                if phase_values.len() != phases.len() || phase_values.is_empty() {
+                // Open entries belong to individual conductors. Removing one
+                // must not discard the finite constraints on the other phases.
+                if phase_values.len() != phases.len()
+                    || phase_values.is_empty()
+                    || phase_values.iter().all(|v| v.to_bits() == open.to_bits())
+                {
                     return (None, None);
                 }
                 if uniform(&phase_values) {
@@ -677,13 +958,25 @@ impl<'a> Reader<'a> {
         for key in ["angmin", "angmax"] {
             let values = branch.floats(key);
             if !values.is_empty()
-                && values
-                    .iter()
-                    .any(|v| (v.abs() - 60f64.to_radians()).abs() > 1e-9)
+                && values.iter().any(|v| {
+                    (v.abs()
+                        - if self.per_unit {
+                            60f64.to_radians()
+                        } else {
+                            60.0
+                        })
+                    .abs()
+                        > 1e-9
+                })
             {
                 extras.insert(
                     format!("pmd_{key}"),
-                    json!(values.iter().map(|v| v.to_degrees()).collect::<Vec<_>>()),
+                    json!(
+                        values
+                            .iter()
+                            .map(|v| if self.per_unit { v.to_degrees() } else { *v })
+                            .collect::<Vec<_>>()
+                    ),
                 );
             }
         }
@@ -731,7 +1024,18 @@ impl<'a> Reader<'a> {
                 _ => {}
             }
         }
-        units.sort_by_key(|u| u.int("index").unwrap_or(i64::MAX));
+        // Integer indices can be renumbered without changing the circuit.
+        // Winding identity is recorded in PMD's virtual source/name suffix.
+        let unit_prefix = format!("_virtual_transformer.{}.", entry.from);
+        let source_prefix = format!("_virtual_transformer.transformer.{}.", entry.from);
+        units.sort_by_key(|u| {
+            u.str("source_id")
+                .and_then(|s| s.strip_prefix(&source_prefix))
+                .or_else(|| u.str("name").and_then(|s| s.strip_prefix(&unit_prefix)))
+                .and_then(|s| s.parse::<i64>().ok())
+                .or_else(|| u.int("index"))
+                .unwrap_or(i64::MAX)
+        });
         if units.is_empty() {
             self.warn(
                 &C::READ_PMD_MATH_RECORD_DROPPED,
@@ -754,7 +1058,7 @@ impl<'a> Reader<'a> {
         let mut polarity = Vec::new();
         let mut taps_differ = false;
         let mut status_disabled = false;
-        let mut sm_ub_kva = None;
+        let mut sm_ub_power_units = None;
         let ends: Vec<(String, String)> = if direct {
             let u = &units[0];
             vec![
@@ -770,6 +1074,7 @@ impl<'a> Reader<'a> {
         for (w, (bus_key, connections_key)) in ends.iter().enumerate() {
             let unit = if direct { &units[0] } else { &units[w] };
             let conn = match unit.str("configuration") {
+                _ if direct && w == 1 => DistWindingConn::Wye,
                 Some("DELTA") => DistWindingConn::Delta,
                 _ => DistWindingConn::Wye,
             };
@@ -789,30 +1094,71 @@ impl<'a> Reader<'a> {
             } else {
                 tm_nom
             };
+            let to_kv = if self.per_unit { t_vbase } else { 1.0 };
+            let ratio_kv = if direct { kv_ll * to_kv } else { kv_ll };
             let kv = if direct && w == 1 {
-                // The to side of an asymmetric unit is at the to bus base.
-                if self.per_unit { t_vbase } else { 1.0 }
+                // A direct unit states a ratio, not two winding voltages.
+                // Choose the to bus base and recover the from voltage on it.
+                to_kv
             } else if conn == DistWindingConn::Delta {
-                kv_ll / 3f64.sqrt()
+                ratio_kv / 3f64.sqrt()
             } else {
-                kv_ll
+                ratio_kv
             };
             vnom_kv.push(kv);
-            let map = unit.connections(connections_key);
-            let hot = map.iter().filter(|t| *t != "4").count();
-            phases = phases.max(hot);
+            let mut map = unit.connections(connections_key);
             let bus = self.bus_id(bus_key, &what);
-            let tm_set = unit.floats("tm_set");
+            if conn == DistWindingConn::Wye
+                && self.doc.get("is_kron_reduced").and_then(Value::as_bool) == Some(true)
+                && !map.iter().any(|t| t == "4")
+            {
+                // Native PMD removes the first (grounded) terminal of the
+                // reversed center-tap half, retaining its -1 polarity. Put
+                // the neutral back on that side so typed consumers preserve
+                // the split-phase voltage instead of ignoring an extras flag.
+                if w == 2
+                    && ends.len() == 3
+                    && ends[1].0 == *bus_key
+                    && map.len() == 1
+                    && unit.int("polarity") == Some(-1)
+                {
+                    map.insert(0, "4".to_owned());
+                } else {
+                    map.push("4".to_owned());
+                }
+                self.restore_neutral(&bus);
+            }
+            let hot = crate::model::n_winding_phase_count(conn, &map);
+            phases = phases.max(hot);
+            // The direct unit's tap and polarity act once, on its from
+            // winding. Applying them to both synthesized windings cancels them.
+            let identity_side = direct && w == 1;
+            let tm_set = if identity_side {
+                vec![1.0; hot]
+            } else {
+                unit.floats("tm_set")
+            };
             taps_differ |= !uniform(&tm_set);
-            tm_set_rows.push(unit.fields.get("tm_set").cloned().unwrap_or(Value::Null));
-            tm_fix_rows.push(unit.fields.get("tm_fix").cloned().unwrap_or(Value::Null));
-            tm_lb_rows.push(unit.fields.get("tm_lb").cloned().unwrap_or(Value::Null));
-            tm_ub_rows.push(unit.fields.get("tm_ub").cloned().unwrap_or(Value::Null));
-            tm_step_rows.push(unit.fields.get("tm_step").cloned().unwrap_or(Value::Null));
-            polarity.push(unit.int("polarity").unwrap_or(1));
+            let tap_field = |key: &str, identity: Value| {
+                if identity_side {
+                    identity
+                } else {
+                    unit.fields.get(key).cloned().unwrap_or(Value::Null)
+                }
+            };
+            tm_set_rows.push(tap_field("tm_set", json!(tm_set)));
+            tm_fix_rows.push(tap_field("tm_fix", json!(vec![true; hot])));
+            tm_lb_rows.push(tap_field("tm_lb", json!(vec![1.0; hot])));
+            tm_ub_rows.push(tap_field("tm_ub", json!(vec![1.0; hot])));
+            tm_step_rows.push(tap_field("tm_step", json!(vec![0.0; hot])));
+            polarity.push(if identity_side {
+                1
+            } else {
+                unit.int("polarity").unwrap_or(1)
+            });
             status_disabled |= unit.int("status") == Some(0);
-            if let Some(sm_ub) = unit.f("sm_ub").filter(|v| v.is_finite()) {
-                sm_ub_kva = Some(if self.per_unit {
+            if let Some(sm_ub) = unit.f("sm_ub") {
+                sm_ub_power_units = Some(if self.per_unit {
                     sm_ub * self.sbase
                 } else {
                     sm_ub
@@ -829,8 +1175,12 @@ impl<'a> Reader<'a> {
         // The winding power rating is not in the MATHEMATICAL model. The
         // emergency rating stands in for it, and every impedance below is
         // restated on that base, so the ohms are exact.
-        let s_rating = sm_ub_kva.map_or(0.0, |kva| kva * self.power_scale_factor);
-        if s_rating > 0.0 {
+        let s_rating = sm_ub_power_units
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map_or(self.sbase * self.power_scale_factor, |kva| {
+                kva * self.power_scale_factor
+            });
+        if sm_ub_power_units.is_some_and(|v| v.is_finite() && v > 0.0) {
             self.warn(
                 &C::READ_PMD_MATH_VALUE_SUBSTITUTED,
                 format!("{what}: the MATHEMATICAL model states no winding power rating; the emergency rating sm_ub is used as the rating and the impedances are restated on it"),
@@ -838,7 +1188,7 @@ impl<'a> Reader<'a> {
         } else {
             self.warn(
                 &C::READ_PMD_MATH_VALUE_DEFAULTED,
-                format!("{what}: no power rating is stated; the windings carry none"),
+                format!("{what}: no positive finite winding power rating is recoverable; the system power base is used only to restate winding impedances and the original capacity bound is retained"),
             );
         }
         for w in &mut windings {
@@ -856,19 +1206,40 @@ impl<'a> Reader<'a> {
             let ratios: Vec<f64> = vnom_kv.clone();
             let mut star: Vec<String> = Vec::new();
             let mut used: BTreeSet<String> = BTreeSet::new();
+            let branch_prefix = format!("_virtual_branch.transformer.{}_", entry.from);
+            let native_names = branches.iter().any(|b| {
+                b.name().starts_with(&branch_prefix)
+                    || b.str("source_id")
+                        .is_some_and(|s| s.starts_with(&branch_prefix))
+            });
             for (w, t_bus) in internal.iter().enumerate() {
+                // A zero resistance is merged out by PMD. The remaining
+                // incident edge may then be leakage, or another winding's
+                // resistance. PMD's branch identity keeps the original edge
+                // number (1..=nrw are resistances) across those merges.
+                let resistance_name =
+                    format!("_virtual_branch.transformer.{}_{}", entry.from, w + 1);
                 let found = branches.iter().find(|b| {
                     !used.contains(&b.key)
+                        && if native_names {
+                            b.name() == resistance_name
+                                || b.str("source_id") == Some(resistance_name.as_str())
+                        } else {
+                            b.matrix("br_x")
+                                .is_none_or(|m| m.iter().flatten().all(|v| *v == 0.0))
+                                && b.matrix("br_r")
+                                    .is_some_and(|m| m.iter().flatten().any(|v| *v != 0.0))
+                        }
                         && (b.index("f_bus").as_ref() == Some(t_bus)
                             || b.index("t_bus").as_ref() == Some(t_bus))
-                        && {
+                        && (native_names || {
                             let other = if b.index("f_bus").as_ref() == Some(t_bus) {
                                 b.index("t_bus")
                             } else {
                                 b.index("f_bus")
                             };
                             other.as_ref().is_none_or(|o| !internal_set.contains(o))
-                        }
+                        })
                 });
                 if let Some(b) = found {
                     used.insert(b.key.clone());
@@ -955,9 +1326,20 @@ impl<'a> Reader<'a> {
         if polarity != crate::pmd::write::lag_polarity(&windings) {
             extras.insert("pmd_polarity".into(), json!(polarity));
         }
-        if let Some(kva) = sm_ub_kva {
-            extras.insert("emerghkva".into(), json!(kva));
-        }
+        // An absent or null sm_ub is unbounded, independently of the
+        // positive computational rating used above. Both PMD writers read
+        // the existing DSS-style numeric-string emergency-rating stash.
+        // This existing cross-format stash is always kVA, independent of
+        // the MATHEMATICAL document's configurable power scale factor.
+        let kva = sm_ub_power_units.unwrap_or(f64::INFINITY) * (self.power_scale_factor / 1000.0);
+        extras.insert(
+            "emerghkva".into(),
+            if kva.is_finite() {
+                json!(kva)
+            } else {
+                json!("Inf")
+            },
+        );
         if status_disabled {
             extras.insert("pmd_status".into(), json!("DISABLED"));
         }
@@ -1027,7 +1409,12 @@ impl<'a> Reader<'a> {
             }
             for (key, out) in [("g_fr", "pmd_g_fr"), ("g_to", "pmd_g_to")] {
                 if let Some(m) = b.matrix(key) {
-                    extras.insert(out.into(), matrix_value(&divided(&m, zbase)));
+                    // PMD applies the same frequency conversion to all four
+                    // ENGINEERING line/switch admittance fields, including g.
+                    extras.insert(
+                        out.into(),
+                        matrix_value(&scaled(&divided(&m, zbase), to_nf)),
+                    );
                 }
             }
             extras.insert("pmd_length".into(), json!(1.0));
@@ -1123,12 +1510,13 @@ impl<'a> Reader<'a> {
         let v_nom =
             vec![vnom_kv * self.voltage_scale_factor; n.min(first.floats("pd").len().max(1))];
         let sum = |key: &str| -> Vec<f64> {
-            let len = parts.iter().map(|p| p.floats(key).len()).max().unwrap_or(0);
+            let values: Vec<Vec<f64>> = parts.iter().map(|p| p.floats(key)).collect();
+            let len = values.iter().map(Vec::len).max().unwrap_or(0);
             (0..len)
                 .map(|k| {
-                    parts
+                    values
                         .iter()
-                        .map(|p| p.floats(key).get(k).copied().unwrap_or(0.0))
+                        .map(|p| p.get(k).copied().unwrap_or(0.0))
                         .sum::<f64>()
                 })
                 .map(|pu| self.watts(pu))
@@ -1138,7 +1526,11 @@ impl<'a> Reader<'a> {
         let q_nom = sum("qd");
         let voltage_model = if parts.len() == 3 {
             let part = |model: &str, key: &str, total: &[f64]| -> Vec<f64> {
-                let p = parts.iter().find(|p| p.str("model") == Some(model));
+                let values = parts
+                    .iter()
+                    .find(|p| p.str("model") == Some(model))
+                    .map(|p| p.floats(key))
+                    .unwrap_or_default();
                 total
                     .iter()
                     .enumerate()
@@ -1146,9 +1538,7 @@ impl<'a> Reader<'a> {
                         if *t == 0.0 {
                             0.0
                         } else {
-                            p.map_or(0.0, |p| {
-                                self.watts(p.floats(key).get(k).copied().unwrap_or(0.0))
-                            }) / t
+                            self.watts(values.get(k).copied().unwrap_or(0.0)) / t
                         }
                     })
                     .collect()
@@ -1351,7 +1741,11 @@ impl<'a> Reader<'a> {
             .iter()
             .map(|v| self.volts(&voltage_bus.key, *v))
             .collect();
-        let va = voltage_bus.floats("va");
+        let va: Vec<f64> = voltage_bus
+            .floats("va")
+            .iter()
+            .map(|v| if self.per_unit { *v } else { v.to_radians() })
+            .collect();
         // The bus arrays run over the bus terminals; the source's phasors
         // are the entries at its connections' positions.
         let terminals = voltage_bus.connections("terminals");

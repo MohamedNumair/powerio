@@ -8353,6 +8353,7 @@ pub(crate) fn write_xiidm(network: &BalancedNetwork) -> Result<TextEmission> {
         message: format!("network validation failed before XIIDM emission: {error}"),
     })?;
     let mut diagnostics = Diagnostics::new();
+    diagnose_unwritten_bus_areas(network, &mut diagnostics);
     if (network.base_mva() - DEFAULT_BASE_MVA).abs() > 1e-9 {
         diagnostics.push(
             &codes::EMIT_XIIDM.value_substituted,
@@ -11383,6 +11384,20 @@ fn write_tie_lines(
             write_identifiable_children(metadata, output);
             output.push_str("  </iidm:tieLine>\n");
         }
+    }
+}
+
+fn diagnose_unwritten_bus_areas(network: &BalancedNetwork, diagnostics: &mut Diagnostics) {
+    let areas: BTreeSet<_> = network.areas().iter().map(|area| area.number).collect();
+    let unrepresented = network
+        .buses()
+        .iter()
+        .filter(|bus| bus.area > 0 && !areas.contains(&bus.area))
+        .count();
+    if unrepresented > 0 {
+        diagnostics.push(&codes::EMIT_XIIDM.field_dropped, format!(
+            "{unrepresented} bus area assignment(s) have no matching area record and are omitted: this writer emits IIDM membership only for areas in the area table"
+        ));
     }
 }
 
@@ -16231,6 +16246,48 @@ mod tests {
         assert!(!calculated[0].contains(" v="));
         assert!(!calculated[0].contains(" angle="));
         assert!(!emission.text.contains("calculated-source"));
+    }
+
+    #[test]
+    fn missing_area_records_diagnose_bus_assignments_including_default_one() {
+        let mut network = parse_xiidm_source(BUS_BREAKER, &mut Diagnostics::new()).unwrap();
+        network.buses_mut()[0].area = 1;
+        network.buses_mut()[1].area = 2;
+        let message = "2 bus area assignment(s) have no matching area record";
+        for (emission, code) in [
+            (
+                write_xiidm(&network).unwrap(),
+                codes::EMIT_XIIDM.field_dropped.code,
+            ),
+            (
+                write_jiidm(&network).unwrap(),
+                codes::EMIT_JIIDM.field_dropped.code,
+            ),
+        ] {
+            assert!(
+                emission.diagnostics.iter().any(|finding| {
+                    finding.code() == code && finding.message().contains(message)
+                }),
+                "{:?}",
+                emission.render_diagnostics()
+            );
+        }
+        network.areas_mut().extend([Area::new(1), Area::new(2)]);
+        let emission = write_xiidm(&network).unwrap();
+        assert!(!emission.diagnostics.iter().any(|finding| {
+            finding
+                .message()
+                .contains("bus area assignment(s) have no matching area record")
+        }));
+        let restored = parse_xiidm_source(&emission.text, &mut Diagnostics::new()).unwrap();
+        assert_eq!(
+            restored
+                .buses()
+                .iter()
+                .map(|bus| bus.area)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 const SCHEMA_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/schema");
-const CURRENT_SCHEMA: &str = "pio-ir/2/0.11.7/schema.json";
+const CURRENT_SCHEMA: &str = "pio-ir/2/0.11.8/schema.json";
 
 fn monitor_discriminator(value: &serde_json::Value) -> Option<(&str, &str)> {
     if value["type"] != "object" {
@@ -195,6 +195,7 @@ fn the_schema_directory_contains_the_documented_powerio_ir_history() {
             "pio-ir/2/0.11.4/schema.json",
             "pio-ir/2/0.11.5/schema.json",
             "pio-ir/2/0.11.6/schema.json",
+            "pio-ir/2/0.11.7/schema.json",
             CURRENT_SCHEMA,
             "pio-ir/2/schema.json",
         ]
@@ -244,6 +245,10 @@ fn historical_schemas_preserve_their_original_identifiers() {
         (
             "pio-ir/2/0.11.6/schema.json",
             "https://powerio.dev/schema/pio-ir/2/0.11.6/schema.json",
+        ),
+        (
+            "pio-ir/2/0.11.7/schema.json",
+            "https://powerio.dev/schema/pio-ir/2/0.11.7/schema.json",
         ),
     ] {
         let schema: serde_json::Value = serde_json::from_str(&read_schema_file(path)).unwrap();
@@ -432,6 +437,7 @@ fn assert_tagged_union_only_adds(
 #[allow(clippy::too_many_lines)]
 fn ir_version_2_schemas_only_add() {
     for earlier in [
+        "pio-ir/2/0.11.7/schema.json",
         "pio-ir/2/0.11.6/schema.json",
         "pio-ir/2/0.11.5/schema.json",
         "pio-ir/2/0.11.4/schema.json",

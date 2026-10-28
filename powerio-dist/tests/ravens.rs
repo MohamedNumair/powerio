@@ -43,9 +43,9 @@ fn case3_balanced_maps_exactly() {
         net.warnings
     );
 
-    // Three connectivity nodes; the source and the wye-load node carry a
+    // Three external nodes plus the ideal EMF behind the source impedance;
     // grounded neutral terminal, the transit node does not.
-    assert_eq!(net.buses().len(), 3);
+    assert_eq!(net.buses().len(), 4);
     let loadbus = net.bus("loadbus").expect("loadbus present");
     assert!(loadbus.terminals.contains(&"4".to_string()));
     assert_eq!(loadbus.grounded, vec!["4".to_string()]);
@@ -53,7 +53,7 @@ fn case3_balanced_maps_exactly() {
 
     // Two per-length impedance matrices become two linecodes, ohm/m, the
     // shunt susceptance split in half at each end.
-    assert_eq!(net.line_codes().len(), 2);
+    assert_eq!(net.line_codes().len(), 3);
     let lc = net.linecode("556mcm").expect("556mcm present");
     assert_eq!(lc.n_conductors, 3);
     assert!(close(lc.r_series[0][0], 0.1));
@@ -65,7 +65,7 @@ fn case3_balanced_maps_exactly() {
     assert_eq!(lc.i_max, Some(vec![600.0, 600.0, 600.0]));
 
     // Two three-phase lines; impedance stays in ohm/m, length in meters.
-    assert_eq!(net.lines().len(), 2);
+    assert_eq!(net.lines().len(), 3);
     let ohline = net.lines().iter().find(|l| l.name == "ohline").unwrap();
     assert_eq!(ohline.bus_from, "sourcebus");
     assert_eq!(ohline.bus_to, "primary");
@@ -98,7 +98,18 @@ fn case3_balanced_maps_exactly() {
     // recovered into extras.
     assert_eq!(net.sources().len(), 1);
     let src = &net.sources()[0];
-    assert_eq!(src.bus, "sourcebus");
+    assert_ne!(src.bus, "sourcebus");
+    let source_branch = net
+        .lines()
+        .iter()
+        .find(|line| line.bus_from == src.bus)
+        .unwrap();
+    assert_eq!(source_branch.bus_to, "sourcebus");
+    let source_z = net.linecode(&source_branch.linecode).unwrap();
+    assert!(close(
+        source_z.r_series[0][0],
+        (2.0 * 3.880_570_000_581_328e-8 + 5.069_596_039_676_399e-8) / 3.0
+    ));
     assert_eq!(src.terminal_map, ["1", "2", "3"]);
     assert!(src.reference_terminal.is_none());
     assert!(close(src.v_magnitude[0], 398.36 / 3f64.sqrt()));

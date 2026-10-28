@@ -8,7 +8,7 @@
 //! between tables. Values are SI (volts, watts, ohms, meters) and radians.
 //!
 //! This is the multiconductor sibling of the balanced MG-RAVENS support in
-//! the `powerio` crate: that reader takes the MATPOWER-derived transmission
+//! the `powerio-tx` crate: that reader takes the MATPOWER-derived transmission
 //! profile and refuses documents with per-phase detail; this one takes the
 //! OpenDSS-derived distribution profile — `ACLineSegmentPhase`,
 //! `EnergyConsumerPhase`, `PerLengthPhaseImpedance` matrices,

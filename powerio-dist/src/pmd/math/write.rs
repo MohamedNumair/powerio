@@ -28,6 +28,88 @@ use crate::pmd::write::{capacitor_susceptance, matrix, renamed_terminals};
 /// `Inf`, which the JSON writer turns into `null` the way PMD's does.
 const INF: f64 = f64::INFINITY;
 
+pub(crate) fn validate_emission(net: &MulticonductorNetwork) -> Result<(), powerio_core::Error> {
+    let count = |name: &str, n: usize| {
+        if n > super::read::MAX_MATRIX_DIM {
+            return Err(powerio_core::Error::new(
+                &C::BUILD_DIST_ELECTRICAL_INCOMPLETE,
+                format!(
+                    "{name}: dimension {n} exceeds {}",
+                    super::read::MAX_MATRIX_DIM
+                ),
+            ));
+        }
+        Ok(())
+    };
+    let check = |name: &str, extras: &Extras, keys: &[&str]| {
+        for key in keys {
+            if let Some(value) = extras.get(*key)
+                && super::read::matrix_dimension(value).is_none()
+            {
+                return Err(powerio_core::Error::new(
+                    &C::BUILD_DIST_ELECTRICAL_INCOMPLETE,
+                    format!(
+                        "{name}: {key} must be a nonempty square numeric matrix of at most {} conductors",
+                        super::read::MAX_MATRIX_DIM
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    };
+    for code in net.line_codes() {
+        count(&format!("linecode {}", code.name), code.n_conductors)?;
+    }
+    for line in net.lines() {
+        count(
+            &format!("line {}", line.name),
+            line.terminal_map_from.len().max(line.terminal_map_to.len()),
+        )?;
+    }
+    for shunt in net.shunts() {
+        count(&format!("shunt {}", shunt.name), shunt.terminal_map.len())?;
+    }
+    for load in net.loads() {
+        count(&format!("load {}", load.name), load.terminal_map.len())?;
+    }
+    for transformer in net.transformers() {
+        let name = format!("transformer {}", transformer.name);
+        count(&name, transformer.phases)?;
+        count(&name, transformer.windings.len())?;
+        for winding in &transformer.windings {
+            count(&name, winding.terminal_map.len())?;
+        }
+    }
+    for switch in net.switches() {
+        count(
+            &format!("switch {}", switch.name),
+            switch
+                .terminal_map_from
+                .len()
+                .max(switch.terminal_map_to.len()),
+        )?;
+        check(
+            &format!("switch {}", switch.name),
+            &switch.extras,
+            &[
+                "pmd_rs", "pmd_xs", "pmd_g_fr", "pmd_g_to", "pmd_b_fr", "pmd_b_to",
+            ],
+        )?;
+    }
+    for source in net.sources() {
+        count(
+            &format!("voltage source {}", source.name),
+            source.terminal_map.len(),
+        )?;
+        check(
+            &format!("voltage source {}", source.name),
+            &source.extras,
+            &["rs", "xs"],
+        )?;
+    }
+    Ok(())
+}
+
 /// Emit the MATHEMATICAL document.
 ///
 /// # Errors
@@ -38,13 +120,29 @@ pub(crate) fn emit_pmd_math_json_text(
     options: &PmdMathEmitOptions,
 ) -> TextEmission {
     let mut diagnostics = crate::diagnostics::Diagnostics::new();
-    let reduced;
+    let mut reduced;
     let (net, kron_reduced) = if options.kron_reduce && has_grounded_neutral(net) {
         match crate::kron::neutral_kron_reduce(net, &crate::kron::NeutralKronOptions::default()) {
             Ok(reduction) => {
                 diagnostics.absorb(reduction.report().diagnostics.iter().cloned());
+                let did_reduce = !reduction.report().buses.is_empty();
                 reduced = reduction.network().clone();
-                (&reduced, true)
+                // Neutral removal changes a reversed center-tap map from
+                // [neutral, phase] to [phase]. Keep its original polarity
+                // before that orientation disappears from the terminal map.
+                for (winding_model, original) in reduced
+                    .transformers_mut()
+                    .iter_mut()
+                    .zip(net.transformers())
+                {
+                    winding_model
+                        .extras
+                        .entry("pmd_polarity".into())
+                        .or_insert_with(|| {
+                            json!(crate::pmd::write::lag_polarity(&original.windings))
+                        });
+                }
+                (&reduced, did_reduce)
             }
             Err(error) => {
                 // PMD reduces only the neutrals it can; this writer reduces
@@ -566,6 +664,15 @@ impl Writer {
                 .set("angmin", nums(&vec![-60.0; n]))
                 .set("angmax", nums(&vec![60.0; n]))
                 .set("br_status", json!(status_of(&line.extras)));
+            for (key, engineering_key) in [("angmin", "vad_lb"), ("angmax", "vad_ub")] {
+                if let Some(bounds) = line
+                    .extras
+                    .get(&format!("pmd_{key}"))
+                    .or_else(|| line.extras.get(engineering_key))
+                {
+                    obj.set(key, bounds.clone());
+                }
+            }
             let i_max = line.i_max.as_ref().or(code.i_max.as_ref());
             let s_max = line.s_max.as_ref().or(code.s_max.as_ref());
             let per_phase = |v: Option<&Vec<f64>>, scale: f64| -> Vec<f64> {
@@ -727,8 +834,10 @@ impl Writer {
                     .cloned()
                     .unwrap_or(Value::Null)
             };
-            let sm_ub = extras_f64(&xf.extras, "emerghkva")
-                .unwrap_or_else(|| kw(snom[0], &self.settings) * 1.5);
+            let sm_ub = extras_f64(&xf.extras, "emerghkva").map_or_else(
+                || kw(snom[0], &self.settings) * 1.5,
+                |kva| kva * (1000.0 / self.settings.power_scale_factor),
+            );
             for w in 0..nrw {
                 let winding = &xf.windings[w];
                 let index = self.transformers.len() + 1;
@@ -2292,7 +2401,7 @@ fn invert(a: &[Vec<Complex64>]) -> Option<Vec<Vec<Complex64>>> {
 /// A stashed PMD matrix (array of columns) or a plain row major array.
 fn read_matrix(v: &Value) -> Option<ConductorMatrix> {
     let cols = v.as_array()?;
-    let n = cols.len();
+    let n = super::read::matrix_dimension(v)?;
     let mut m = vec![vec![0.0; n]; n];
     for (j, col) in cols.iter().enumerate() {
         for (i, x) in col.as_array()?.iter().enumerate().take(n) {

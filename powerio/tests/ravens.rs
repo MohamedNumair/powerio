@@ -86,7 +86,8 @@ fn multiconductor_document_routes_to_the_multiconductor_network_by_content() {
                 module.value().type_name()
             );
         };
-        assert_eq!(net.buses().len(), 3);
+        // The finite-impedance source has its own internal EMF node.
+        assert_eq!(net.buses().len(), 4);
         assert_eq!(net.loads().len(), 3);
         assert_eq!(
             net.source_format()
@@ -142,4 +143,69 @@ fn the_catalog_names_the_token_once_under_every_alias() {
         .collect();
     assert_eq!(entries.len(), 1, "one catalog row for the two profiles");
     assert!(entries[0].can_read);
+}
+
+#[test]
+fn profile_routing_ignores_object_names_and_descriptions() {
+    let balanced = r#"{
+        "ConnectivityNode": {"TransformerTank": {
+            "Ravens.cimObjectType": "ConnectivityNode",
+            "IdentifiedObject.name": "ACLineSegmentPhase",
+            "IdentifiedObject.description": "EnergyConsumerPhase"
+        }},
+        "PowerSystemResource": {},
+        "AssetInfo": {}
+    }"#;
+    let module = parse(declared("case.json", balanced, "ravens-json")).unwrap();
+    assert!(matches!(module.value(), PioValue::BalancedNetwork(_)));
+    assert_eq!(emitted_text(&module, "ravens-json"), balanced);
+
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(MULTICONDUCTOR).unwrap()).unwrap();
+    doc["ConnectivityNode"]["sourcebus"]["IdentifiedObject.description"] =
+        serde_json::json!("PowerTransformerEnd");
+    let text = doc.to_string();
+    let module = parse(declared("case.json", &text, "ravens-json")).unwrap();
+    assert!(matches!(module.value(), PioValue::MulticonductorNetwork(_)));
+    assert_eq!(emitted_text(&module, "ravens-json"), text);
+}
+
+#[test]
+fn profile_routing_decodes_equivalent_json_escapes() {
+    let original = std::fs::read_to_string(MULTICONDUCTOR).unwrap();
+    let mut text = original.clone();
+    for marker in powerio_core::cim::ravens::MULTICONDUCTOR_MARKERS {
+        let escaped = format!(
+            r#""\u{:04x}{}""#,
+            u32::from(marker.as_bytes()[0]),
+            &marker[1..]
+        );
+        text = text.replace(&format!("\"{marker}\""), &escaped);
+    }
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        serde_json::from_str::<serde_json::Value>(&original).unwrap()
+    );
+    for source in [
+        Source::from_memory("case.json", text.as_bytes().to_vec()).unwrap(),
+        declared("case.json", &text, "ravens-json"),
+    ] {
+        let module = parse(source).unwrap();
+        assert!(matches!(module.value(), PioValue::MulticonductorNetwork(_)));
+    }
+}
+
+#[test]
+fn genuine_mixed_profiles_and_excessive_nesting_are_refused() {
+    let mixed = r#"{
+        "ConnectivityNode":{},
+        "PerLengthLineParameter":{},
+        "MySettings":{"Ravens.cimObjectType":"Algorithm\u0053ettings"}
+    }"#;
+    let error = parse(declared("case.json", mixed, "ravens-json")).unwrap_err();
+    assert_eq!(error.info().unwrap().code, "PARSE.RAVENS.MIXED_PROFILE");
+
+    let nested = format!("{}null{}", "[".repeat(2048), "]".repeat(2048));
+    let text = format!(r#"{{"ConnectivityNode":{{}},"nested":{nested}}}"#);
+    assert!(parse(declared("case.json", &text, "ravens-json")).is_err());
 }

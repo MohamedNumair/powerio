@@ -124,7 +124,8 @@ mod tests {
         let RavensModule::Multiconductor(module) = module else {
             unreachable!("profile checked");
         };
-        assert_eq!(module.value().buses().len(), 3);
+        // The finite-impedance source has its own internal EMF node.
+        assert_eq!(module.value().buses().len(), 4);
         assert_eq!(
             module
                 .source()

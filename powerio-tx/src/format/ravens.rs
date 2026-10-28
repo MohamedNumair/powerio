@@ -19,11 +19,14 @@
 //! and impedance matrices); a document with multiconductor markers is rejected
 //! with a pointer at the distribution surface rather than read lossily.
 //!
-//! The schema sets `additionalProperties: false` on every class, so the writer
-//! emits only schema-known properties: element `extras` are reported as
-//! fidelity warnings, never smuggled into the document.
+//! The upstream schema restricts the supported vocabulary. Its MATPOWER converter
+//! emits two fields absent from its UML/template: `ConnectivityNode.SvVoltage`
+//! and `MySettings`. This writer retains those converter conventions; the
+//! external validation gate checks them with a narrow, typed supplement to
+//! the upstream schema. Element `extras` are reported as fidelity warnings,
+//! never smuggled into the document.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
@@ -198,8 +201,7 @@ fn warn_extras(kind: &str, name: &str, extras: &crate::network::Extras, out: &mu
     out.push(
         &F.extras_dropped,
         format!(
-            "{kind} {name}: extras [{}] have no MG-RAVENS representation \
-         (the schema closes every class with additionalProperties: false)",
+            "{kind} {name}: extras [{}] have no supported MG-RAVENS representation",
             keys.join(", ")
         ),
     );
@@ -240,6 +242,7 @@ pub(crate) fn write_ravens_json(net: &BalancedNetwork) -> TextEmission {
              still round-trip)",
         );
     }
+    warn_bus_kind_projection(net, &mut warnings);
     for bus in net.buses() {
         write_bus(bus, &mut nodes, &mut op_sets, &mut warnings);
     }
@@ -304,6 +307,7 @@ pub(crate) fn write_ravens_json(net: &BalancedNetwork) -> TextEmission {
             shunts,
             ratio_taps,
             phase_taps,
+            unconnected_bus_anchors(net),
         ),
     );
     root.insert("BaseVoltage".into(), Value::Object(base_voltages));
@@ -319,6 +323,69 @@ pub(crate) fn write_ravens_json(net: &BalancedNetwork) -> TextEmission {
     root.insert("MySettings".into(), settings(net.base_mva()));
 
     finish(&F, root, warnings)
+}
+
+fn warn_bus_kind_projection(net: &BalancedNetwork, warnings: &mut Diagnostics) {
+    let regulating_buses: BTreeSet<BusId> = net
+        .generators()
+        .iter()
+        .filter(|generator| generator.in_service && generator.voltage_regulation_on)
+        .map(|generator| generator.bus)
+        .collect();
+    for bus in net.buses() {
+        let recovered_kind = if bus.kind == BusType::Ref {
+            BusType::Ref
+        } else if regulating_buses.contains(&bus.id) {
+            BusType::Pv
+        } else {
+            BusType::Pq
+        };
+        if recovered_kind != bus.kind {
+            warnings.push(
+                &F.value_substituted,
+                format!(
+                    "bus {}: {:?} bus kind recovers as {recovered_kind:?} from the \
+                     slack marker and active voltage-regulating machines",
+                    bus.id, bus.kind
+                ),
+            );
+        }
+    }
+}
+
+/// A native one-terminal connector anchors the nominal voltage of a bus
+/// with no emitted electrical equipment. Without it the SI voltage state
+/// cannot be converted back to per unit, even though its BaseVoltage exists.
+fn unconnected_bus_anchors(net: &BalancedNetwork) -> Map<String, Value> {
+    let anchored: BTreeSet<BusId> = net
+        .loads()
+        .iter()
+        .map(|load| load.bus)
+        .chain(net.shunts().iter().map(|shunt| shunt.bus))
+        .chain(net.generators().iter().map(|generator| generator.bus))
+        .chain(
+            net.branches()
+                .iter()
+                .flat_map(|branch| [branch.from, branch.to]),
+        )
+        .collect();
+    net.buses()
+        .iter()
+        .filter(|bus| !anchored.contains(&bus.id))
+        .map(|bus| {
+            let name = format!("bus{}_base", bus.id);
+            let mut obj = identified("Connector", &name, None);
+            obj.insert(
+                "ConductingEquipment.BaseVoltage".into(),
+                pointer("BaseVoltage", &base_voltage_name(bus.base_kv)),
+            );
+            obj.insert(
+                "ConductingEquipment.Terminals".into(),
+                Value::Array(vec![terminal(&name, 1, &bus.id.to_string())]),
+            );
+            (name, Value::Object(obj))
+        })
+        .collect()
 }
 
 fn versions() -> Value {
@@ -356,6 +423,7 @@ fn versions() -> Value {
 
 /// The CIM class-hierarchy nesting the schema requires: concrete hash tables
 /// sit under their abstract ancestors.
+#[allow(clippy::too_many_arguments)]
 fn power_system_resources(
     lines: Map<String, Value>,
     transformers: Map<String, Value>,
@@ -364,6 +432,7 @@ fn power_system_resources(
     shunts: Map<String, Value>,
     ratio_taps: Map<String, Value>,
     phase_taps: Map<String, Value>,
+    connectors: Map<String, Value>,
 ) -> Value {
     let mut conductor = Map::new();
     conductor.insert("ACLineSegment".into(), Value::Object(lines));
@@ -377,6 +446,9 @@ fn power_system_resources(
     conducting.insert("Conductor".into(), Value::Object(conductor));
     conducting.insert("PowerTransformer".into(), Value::Object(transformers));
     conducting.insert("EnergyConnection".into(), Value::Object(energy_connection));
+    if !connectors.is_empty() {
+        conducting.insert("Connector".into(), Value::Object(connectors));
+    }
     let mut equipment = Map::new();
     equipment.insert("ConductingEquipment".into(), Value::Object(conducting));
     let mut tap_changer = Map::new();
@@ -527,6 +599,16 @@ fn write_bus(
             ),
         );
     }
+    if bus.area != 1 || bus.zone != 1 {
+        warnings.push(
+            &F.field_dropped,
+            format!(
+                "bus {}: area={} and zone={} have no balanced MG-RAVENS mapping; \
+                 both recover at 1",
+                bus.id, bus.area, bus.zone
+            ),
+        );
+    }
     warn_extras("bus", &bus.id.to_string(), &bus.extras, warnings);
 }
 
@@ -574,13 +656,6 @@ fn load_response_name(
     lrc_extra: &mut Map<String, Value>,
     warnings: &mut Diagnostics,
 ) -> String {
-    let pct = |part: f64, total: f64| {
-        if total == 0.0 {
-            0.0
-        } else {
-            100.0 * part / total
-        }
-    };
     match &load.voltage_model {
         None | Some(LoadVoltageModel::ConstantPower) => "Constant kVA".into(),
         Some(LoadVoltageModel::Zip {
@@ -594,6 +669,37 @@ fn load_response_name(
             load_type,
             scaling,
         }) => {
+            for (component, total, parts) in [
+                (
+                    "active",
+                    load.p,
+                    [
+                        *p_constant_power,
+                        *p_constant_current,
+                        *p_constant_impedance,
+                    ],
+                ),
+                (
+                    "reactive",
+                    load.q,
+                    [
+                        *q_constant_power,
+                        *q_constant_current,
+                        *q_constant_impedance,
+                    ],
+                ),
+            ] {
+                if total == 0.0 && parts.iter().any(|part| *part != 0.0) {
+                    warnings.push(
+                        &F.value_collapsed,
+                        format!(
+                            "load {name}: nonzero {component} ZIP components sum to zero; \
+                             MG-RAVENS percentages cannot represent them with zero nominal \
+                             power, so the {component} voltage dependence is collapsed to zero"
+                        ),
+                    );
+                }
+            }
             if v_nom.is_some() || load_type.is_some() || scaling.is_some() {
                 warnings.push(
                     &F.field_dropped,
@@ -615,15 +721,20 @@ fn load_response_name(
             ] {
                 lrc.insert(
                     format!("LoadResponseCharacteristic.{field}"),
-                    jnum(pct(part, total)),
+                    jnum(zip_percentage(part, total)),
                 );
             }
             lrc_extra.insert(lrc_name.clone(), Value::Object(lrc));
             lrc_name
         }
         Some(LoadVoltageModel::Exponential {
-            gamma_p, gamma_q, ..
+            p,
+            q,
+            v_nom,
+            gamma_p,
+            gamma_q,
         }) => {
+            warn_exponential_projection(load, name, *p, *q, *v_nom, warnings);
             let lrc_name = format!("lrc_{name}");
             let mut lrc = identified("LoadResponseCharacteristic", &lrc_name, None);
             lrc.insert(
@@ -641,6 +752,44 @@ fn load_response_name(
             lrc_extra.insert(lrc_name.clone(), Value::Object(lrc));
             lrc_name
         }
+    }
+}
+
+fn zip_percentage(part: f64, total: f64) -> f64 {
+    if total == 0.0 {
+        0.0
+    } else {
+        100.0 * part / total
+    }
+}
+
+#[allow(clippy::float_cmp)] // Exact comparison detects any discarded coefficient assignment.
+fn warn_exponential_projection(
+    load: &Load,
+    name: &str,
+    p: f64,
+    q: f64,
+    v_nom: Option<f64>,
+    warnings: &mut Diagnostics,
+) {
+    if let Some(v_nom) = v_nom {
+        warnings.push(
+            &F.field_dropped,
+            format!(
+                "load {name}: exponential v_nom={v_nom} has no MG-RAVENS \
+                 load-response slot; the voltage law uses the default reference"
+            ),
+        );
+    }
+    if p != load.p || q != load.q {
+        warnings.push(
+            &F.value_collapsed,
+            format!(
+                "load {name}: exponential coefficients p={p}, q={q} differ from \
+                 load power; the MG-RAVENS voltage law uses p={}, q={}",
+                load.p, load.q
+            ),
+        );
     }
 }
 
@@ -687,6 +836,15 @@ fn write_shunt(
             ),
         );
     }
+    if let Some(count) = shunt.section_count {
+        warnings.push(
+            &F.value_collapsed,
+            format!(
+                "shunt {name}: assigned section_count={count} is not preserved; \
+                 total admittance is restated as one fixed section"
+            ),
+        );
+    }
     warn_extras("shunt", &name, &shunt.extras, warnings);
     shunts.insert(name, Value::Object(obj));
 }
@@ -722,6 +880,10 @@ fn write_generator(
     obj.insert(
         "Equipment.inService".into(),
         Value::Bool(generator.in_service),
+    );
+    obj.insert(
+        "RegulatingCondEq.controlEnabled".into(),
+        Value::Bool(generator.voltage_regulation_on),
     );
     if let Some(kv) = kv_of.get(&generator.bus) {
         obj.insert(
@@ -781,7 +943,39 @@ fn write_generator(
             format!("generator {name}: capability/ramp columns have no MG-RAVENS slot"),
         );
     }
+    warn_generator_metadata(generator, &name, warnings);
     gens.insert(name, Value::Object(obj));
+}
+
+fn warn_generator_metadata(generator: &Generator, name: &str, warnings: &mut Diagnostics) {
+    if generator.energy_source != crate::network::GeneratorEnergySource::Other {
+        warnings.push(
+            &F.field_dropped,
+            format!(
+                "generator {name}: energy_source={:?} has no balanced MG-RAVENS \
+                 mapping and recovers as Other",
+                generator.energy_source
+            ),
+        );
+    }
+    if generator.regulating_terminal.is_some() {
+        warnings.push(
+            &F.field_dropped,
+            format!(
+                "generator {name}: exact regulating_terminal reference has no \
+                 balanced MG-RAVENS mapping"
+            ),
+        );
+    }
+    if generator.active_power_control.is_some() {
+        warnings.push(
+            &F.field_dropped,
+            format!(
+                "generator {name}: active_power_control governor and distributed-slack \
+                 settings have no balanced MG-RAVENS mapping"
+            ),
+        );
+    }
 }
 
 /// A polynomial cost as a `ProducerCostFunction`, or the reason it can't be.
@@ -927,6 +1121,26 @@ fn write_branch(
             ),
         );
     }
+    if let Some(name) = &branch.name {
+        warnings.push(
+            &F.field_dropped,
+            format!(
+                "branch {n} ({}-{}): source equipment name `{name}` is not preserved \
+                 by the balanced MG-RAVENS positional naming convention",
+                branch.from, branch.to
+            ),
+        );
+    }
+    if branch.solution.is_some() {
+        warnings.push(
+            &F.field_dropped,
+            format!(
+                "branch {n} ({}-{}): assigned solution flows (pf/qf/pt/qt) have no \
+                 balanced MG-RAVENS mapping",
+                branch.from, branch.to
+            ),
+        );
+    }
     warn_extras(
         "branch",
         &format!("{n} ({}-{})", branch.from, branch.to),
@@ -1045,11 +1259,15 @@ fn write_branch(
 /// Element families with no MG-RAVENS mapping in the balanced profile, each
 /// reported once with its count.
 fn warn_unrepresented(net: &BalancedNetwork, warnings: &mut Diagnostics) {
-    let families: [(&str, usize); 6] = [
+    let families: [(&str, usize); 7] = [
         ("switch", net.switches().len()),
         ("storage unit", net.storage().len()),
         ("HVDC line", net.hvdc().len()),
         ("three-winding transformer", net.transformers_3w().len()),
+        (
+            "static VAR compensator",
+            net.static_var_compensators().len(),
+        ),
         (
             "area record",
             net.areas()
@@ -1336,6 +1554,11 @@ pub(crate) fn parse_ravens_source(
         generator.qmin = f_or(obj, "SynchronousMachine.minQ", 0.0) / WATT;
         generator.mbase = f_or(obj, "RotatingMachine.ratedS", 0.0) / WATT;
         generator.in_service = in_service(obj);
+        generator.voltage_regulation_on = obj
+            .props
+            .get("RegulatingCondEq.controlEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         generator.uid = mrid(obj);
         if let Some(Value::Object(unit)) = obj.props.get("RotatingMachine.GeneratingUnit") {
             generator.pmin = unit
@@ -1354,7 +1577,16 @@ pub(crate) fn parse_ravens_source(
             .get("RotatingMachine.CostFunction")
             .and_then(|p| doc.resolve(p))
         {
-            generator.cost = read_cost(cost);
+            match read_cost(cost) {
+                Ok(value) => generator.cost = Some(value),
+                Err(reason) => warnings.push(
+                    &codes::READ_RAVENS_RECORD_DROPPED,
+                    format!(
+                        "generator {}: cost {} dropped: {reason}",
+                        obj.name, cost.name
+                    ),
+                ),
+            }
         }
         generators.push(generator);
     }
@@ -1366,6 +1598,7 @@ pub(crate) fn parse_ravens_source(
             continue;
         };
         let mut generator = Generator::new(bus);
+        generator.in_service = in_service(obj);
         if let Some(kv) = kv_of.get(&bus)
             && let Some(v) = fprop(obj, "EnergySource.voltageMagnitude")
         {
@@ -1375,12 +1608,14 @@ pub(crate) fn parse_ravens_source(
         warnings.push(
             &codes::READ_RAVENS_VALUE_COLLAPSED,
             format!(
-                "source {}: EnergySource mapped to a slack generator (no P/Q \
-             bounds in the source record)",
+                "source {}: EnergySource mapped to a generator, slack when in service \
+                 (no P/Q bounds in the source record)",
                 obj.name
             ),
         );
-        ref_buses.push(bus);
+        if generator.in_service {
+            ref_buses.push(bus);
+        }
         generators.push(generator);
     }
 
@@ -1593,7 +1828,10 @@ fn read_buses(
         let node = node_table
             .get(name)
             .and_then(Value::as_object)
-            .expect("key came from this table");
+            .ok_or_else(|| Error::FormatRead {
+                format: FMT,
+                message: format!("ConnectivityNode `{name}` is not an object"),
+            })?;
         let kv = kv_votes.get(&id).copied().unwrap_or_else(|| {
             warnings.push(
                 &codes::READ_RAVENS_VALUE_DEFAULTED,
@@ -1819,27 +2057,37 @@ fn tap_ratio(obj: &Obj) -> Option<f64> {
         .as_f64()
 }
 
-fn read_cost(obj: &Obj) -> Option<GenCost> {
+fn read_cost(obj: &Obj) -> std::result::Result<GenCost, &'static str> {
     let params = obj
         .props
-        .get("ProducerCostFunction.CostParameters")?
-        .as_array()?;
-    let mut by_power: Vec<(u64, f64)> = params
-        .iter()
-        .filter_map(|p| {
-            let p = p.as_object()?;
-            Some((
-                p.get("PolynomialCostParameter.power")?.as_u64()?,
-                p.get("PolynomialCostParameter.costCoefficient")?.as_f64()?,
-            ))
-        })
-        .collect();
-    by_power.sort_by_key(|(power, _)| std::cmp::Reverse(*power));
-    let coeffs: Vec<f64> = by_power.into_iter().map(|(_, c)| c).collect();
-    if coeffs.is_empty() {
-        return None;
+        .get("ProducerCostFunction.CostParameters")
+        .and_then(Value::as_array)
+        .filter(|params| !params.is_empty())
+        .ok_or("no cost parameter array")?;
+    let mut by_power = BTreeMap::new();
+    for param in params {
+        let power = param
+            .get("PolynomialCostParameter.power")
+            .and_then(Value::as_u64)
+            .filter(|power| *power <= 2)
+            .ok_or("only polynomial powers 0, 1 and 2 have a balanced-profile mapping")?;
+        let coefficient = param
+            .get("PolynomialCostParameter.costCoefficient")
+            .and_then(Value::as_f64)
+            .ok_or("polynomial cost coefficient is missing or nonnumeric")?;
+        if by_power.insert(power, coefficient).is_some() {
+            return Err("duplicate polynomial power");
+        }
     }
-    Some(GenCost::new(
+    let degree = *by_power
+        .last_key_value()
+        .expect("nonempty cost parameters")
+        .0;
+    let coeffs = (0..=degree)
+        .rev()
+        .map(|power| by_power.get(&power).copied().unwrap_or(0.0))
+        .collect();
+    Ok(GenCost::new(
         2,
         f_or(obj, "ProducerCostFunction.startupCost", 0.0),
         f_or(obj, "ProducerCostFunction.shutdownCost", 0.0),
@@ -1891,33 +2139,38 @@ fn load_voltage_model(doc: &Doc, obj: &Obj, load: &Load) -> Option<LoadVoltageMo
         && part("qConstantPower") == 100.0
         && part("pConstantCurrent") == 0.0
         && part("pConstantImpedance") == 0.0
+        && part("qConstantCurrent") == 0.0
+        && part("qConstantImpedance") == 0.0
     {
         return None;
     }
     Some(zip)
 }
 
-/// PQ/PV/REF assignment: generator buses read as PV, the slack markers (the
-/// `slack` limit type, or an `EnergySource`) as REF.
+/// PQ/PV/REF assignment: online voltage-regulating machines make their buses
+/// PV; slack markers and online `EnergySource` records make their buses REF.
 fn apply_bus_kinds(buses: &mut [Bus], generators: &[Generator], ref_buses: &[BusId]) {
+    let regulating_buses: BTreeSet<BusId> = generators
+        .iter()
+        .filter(|generator| generator.in_service && generator.voltage_regulation_on)
+        .map(|generator| generator.bus)
+        .collect();
     for bus in buses.iter_mut() {
-        let has_gen = generators.iter().any(|g| g.bus == bus.id);
         if ref_buses.contains(&bus.id) {
             bus.kind = BusType::Ref;
         } else if bus.kind == BusType::Ref {
             // Marked by the slack limit type in read_buses; keep it.
-        } else if has_gen {
+        } else if regulating_buses.contains(&bus.id) {
             bus.kind = BusType::Pv;
         }
     }
-    // A generator's voltage setpoint defaults to its bus solution voltage.
-    // (vg has no RAVENS slot; the SvVoltage magnitude is the best recovery.)
+    // Generator voltage setpoints remain the documented 1 p.u. default.
 }
 
 /// Object kinds the balanced reader consumed nothing from, one warning per
 /// kind with a count, so a document leaning on unmodeled CIM classes is loud.
 fn warn_unread_kinds(doc: &Doc, warnings: &mut Diagnostics) {
-    const READ: [&str; 14] = [
+    const READ: [&str; 15] = [
         "ConnectivityNode",
         "SvVoltage",
         "Terminal",
@@ -1932,6 +2185,7 @@ fn warn_unread_kinds(doc: &Doc, warnings: &mut Diagnostics) {
         "AsynchronousMachine",
         "EnergySource",
         "ACLineSegment",
+        "Connector",
     ];
     const READ_STRUCTURAL: [&str; 10] = [
         "PowerTransformer",
@@ -1987,6 +2241,281 @@ mod tests {
 
     fn network(name: &str) -> BalancedNetwork {
         parse_file(case(name), None).unwrap().network
+    }
+
+    fn two_bus_network() -> BalancedNetwork {
+        let mut net = BalancedNetwork::in_memory(
+            "two-bus",
+            100.0,
+            vec![
+                Bus::new(BusId::new(1), BusType::Ref, 20.0),
+                Bus::new(BusId::new(2), BusType::Pq, 20.0),
+            ],
+            vec![Branch::new(BusId::new(1), BusId::new(2), 0.01, 0.1)],
+        );
+        net.generators_mut().push(Generator::new(BusId::new(1)));
+        net.loads_mut().push(Load::new(BusId::new(2), 10.0, 3.0));
+        net
+    }
+
+    #[test]
+    fn only_online_voltage_regulating_machines_promote_pq_buses() {
+        let mut net = two_bus_network();
+        let mut generator = Generator::new(BusId::new(2));
+        generator.voltage_regulation_on = false;
+        net.generators_mut().push(generator);
+        for (in_service, regulating) in [(true, false), (false, true)] {
+            net.generators_mut()[1].in_service = in_service;
+            net.generators_mut()[1].voltage_regulation_on = regulating;
+            let emitted = write_ravens_json(&net);
+            assert!(emitted.diagnostics.is_empty(), "{:?}", emitted.diagnostics);
+            let (back, findings) = parse_ravens_json(&emitted.text).unwrap();
+            assert!(findings.is_empty(), "{findings:?}");
+            assert_eq!(back.buses()[1].kind, BusType::Pq);
+            assert_eq!(back.generators()[1].in_service, in_service);
+            assert_eq!(back.generators()[1].voltage_regulation_on, regulating);
+        }
+    }
+
+    #[test]
+    fn an_inactive_energy_source_is_not_reenabled_or_made_a_slack() {
+        let net = two_bus_network();
+        let mut doc: Value = serde_json::from_str(&write_ravens_json(&net).text).unwrap();
+        doc["PowerSystemResource"]["Equipment"]["ConductingEquipment"]["EnergyConnection"]["EnergySource"] = serde_json::json!({
+            "source2": {
+                "Ravens.cimObjectType": "EnergySource",
+                "Equipment.inService": false,
+                "ConductingEquipment.BaseVoltage": "BaseVoltage::'BaseV_20'",
+                "ConductingEquipment.Terminals": [terminal("source2", 1, "2")],
+                "EnergySource.voltageMagnitude": 20_000.0
+            }
+        });
+        let (back, _) = parse_ravens_json(&doc.to_string()).unwrap();
+        assert_eq!(back.generators().len(), 2);
+        assert!(!back.generators()[1].in_service);
+        assert_eq!(back.buses()[1].kind, BusType::Pq);
+    }
+
+    #[test]
+    fn native_connector_preserves_an_unequipped_bus_voltage_base() {
+        let mut net = two_bus_network();
+        let mut bus = Bus::new(BusId::new(3), BusType::Pq, 35.0);
+        bus.vm = 1.02;
+        net.buses_mut().push(bus);
+        let emitted = write_ravens_json(&net);
+        assert!(emitted.diagnostics.is_empty(), "{:?}", emitted.diagnostics);
+        let (back, findings) = parse_ravens_json(&emitted.text).unwrap();
+        assert!(findings.is_empty(), "{findings:?}");
+        assert_projection(&net, &back);
+        let restored = &back.buses()[2];
+        assert!((restored.base_kv - 35.0).abs() < 1e-12);
+        assert!((restored.vm - 1.02).abs() < 1e-12);
+        assert!((restored.vmin - 0.9).abs() < 1e-12);
+        assert!((restored.vmax - 1.1).abs() < 1e-12);
+        assert_same_text(&emitted.text, &write_ravens_json(&back).text);
+    }
+
+    #[test]
+    fn sparse_polynomial_cost_preserves_explicit_powers() {
+        let mut net = two_bus_network();
+        net.generators_mut()[0].cost = Some(GenCost::new(2, 0.0, 0.0, vec![0.11, 0.0, 150.0]));
+        let mut doc: Value = serde_json::from_str(&write_ravens_json(&net).text).unwrap();
+        doc["ProducerCostFunction"]["cost_gen1"]["ProducerCostFunction.CostParameters"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|term| term["PolynomialCostParameter.power"] != 1);
+        let (back, findings) = parse_ravens_json(&doc.to_string()).unwrap();
+        assert!(findings.is_empty(), "{findings:?}");
+        let cost = back.generators()[0].cost.as_ref().unwrap();
+        assert_eq!(cost.coeffs, [0.11, 0.0, 150.0]);
+        assert_eq!(cost.ncost, 3);
+
+        doc["ProducerCostFunction"]["cost_gen1"]["ProducerCostFunction.CostParameters"][0]["PolynomialCostParameter.power"] =
+            Value::from(u64::MAX);
+        let (back, findings) = parse_ravens_json(&doc.to_string()).unwrap();
+        assert!(back.generators()[0].cost.is_none());
+        assert!(
+            findings.iter().any(|finding| {
+                finding.contains("READ.RAVENS.RECORD_DROPPED")
+                    && finding.contains("polynomial powers")
+            }),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn unrepresented_static_var_compensators_are_diagnosed() {
+        let mut net = two_bus_network();
+        net.static_var_compensators_mut()
+            .push(crate::network::StaticVarCompensator::new(
+                BusId::new(2),
+                -0.002,
+                0.002,
+            ));
+        let emitted = write_ravens_json(&net);
+        let findings = emitted.render_diagnostics();
+        assert!(
+            findings.iter().any(|finding| {
+                finding.contains("EMIT.RAVENS.RECORD_DROPPED")
+                    && finding.contains("1 static VAR compensator")
+            }),
+            "{findings:?}"
+        );
+    }
+
+    #[test]
+    fn dropped_typed_metadata_is_named_while_source_mrids_are_preserved() {
+        use crate::network::{
+            ActivePowerControl, BranchSolution, GeneratorEnergySource, TerminalReference,
+        };
+
+        let mut net = two_bus_network();
+        // GridFM's zero area/zone assignments also recover as the RAVENS
+        // profile's one-based defaults and need a loss finding.
+        net.buses_mut()[1].area = 0;
+        net.buses_mut()[1].zone = 0;
+        let branch = &mut net.branches_mut()[0];
+        branch.uid = Some("source-line".into());
+        branch.name = Some("North line".into());
+        branch.solution = Some(BranchSolution::new(10.0, 3.0, -9.9, -2.9));
+        let generator = &mut net.generators_mut()[0];
+        generator.uid = Some("source-generator".into());
+        generator.energy_source = GeneratorEnergySource::Wind;
+        generator.active_power_control = Some(ActivePowerControl::new(true));
+        generator.regulating_terminal = Some(TerminalReference {
+            equipment: powerio_core::ComponentId::new("generator", "source-generator").unwrap(),
+            terminal: 1,
+        });
+        let mut shunt = Shunt::new(BusId::new(2), 0.0, 12.0);
+        shunt.uid = Some("source-shunt".into());
+        shunt.section_count = Some(3);
+        net.shunts_mut().push(shunt);
+
+        let emitted = write_ravens_json(&net);
+        let findings = emitted.render_diagnostics();
+        for field in [
+            "area=0 and zone=0",
+            "source equipment name `North line`",
+            "solution flows (pf/qf/pt/qt)",
+            "energy_source=Wind",
+            "active_power_control",
+            "regulating_terminal",
+            "section_count=3",
+        ] {
+            assert!(
+                findings.iter().any(|finding| finding.contains(field)),
+                "missing {field}: {findings:?}"
+            );
+        }
+        assert!(findings.iter().all(|finding| !finding.contains("identity")));
+        let (back, _) = parse_ravens_json(&emitted.text).unwrap();
+        assert_eq!((back.buses()[1].area, back.buses()[1].zone), (1, 1));
+        assert_eq!(back.branches()[0].uid, net.branches()[0].uid);
+        assert!(back.branches()[0].name.is_none());
+        assert!(back.branches()[0].solution.is_none());
+        assert_eq!(back.generators()[0].uid, net.generators()[0].uid);
+        assert_eq!(
+            back.generators()[0].energy_source,
+            GeneratorEnergySource::Other
+        );
+        assert!(back.generators()[0].active_power_control.is_none());
+        assert!(back.generators()[0].regulating_terminal.is_none());
+        assert_eq!(back.shunts()[0].uid, net.shunts()[0].uid);
+        assert!(back.shunts()[0].section_count.is_none());
+        assert!((back.shunts()[0].b - 12.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn zero_net_zip_components_have_a_specific_finite_projection_warning() {
+        let mut net = two_bus_network();
+        let load = &mut net.loads_mut()[0];
+        load.p = 0.0;
+        load.voltage_model = Some(LoadVoltageModel::Zip {
+            p_constant_power: 10.0,
+            q_constant_power: load.q,
+            p_constant_current: -10.0,
+            q_constant_current: 0.0,
+            p_constant_impedance: 0.0,
+            q_constant_impedance: 0.0,
+            v_nom: None,
+            load_type: None,
+            scaling: None,
+        });
+        let emitted = write_ravens_json(&net);
+        let findings = emitted.render_diagnostics();
+        assert!(
+            findings.iter().any(|finding| {
+                finding.contains("EMIT.RAVENS.VALUE_COLLAPSED")
+                    && finding.contains("nonzero active ZIP components sum to zero")
+            }),
+            "{findings:?}"
+        );
+        let (back, _) = parse_ravens_json(&emitted.text).unwrap();
+        assert!(back.loads()[0].p.abs() < 1e-12);
+        assert!((back.loads()[0].q - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn cancelling_reactive_zip_parts_are_not_mistaken_for_constant_power() {
+        let mut net = two_bus_network();
+        net.loads_mut()[0].voltage_model = Some(LoadVoltageModel::Zip {
+            p_constant_power: 10.0,
+            q_constant_power: 3.0,
+            p_constant_current: 0.0,
+            q_constant_current: -0.3,
+            p_constant_impedance: 0.0,
+            q_constant_impedance: 0.3,
+            v_nom: None,
+            load_type: None,
+            scaling: None,
+        });
+        let emitted = write_ravens_json(&net);
+        assert!(emitted.diagnostics.is_empty(), "{:?}", emitted.diagnostics);
+        let (back, findings) = parse_ravens_json(&emitted.text).unwrap();
+        assert!(findings.is_empty(), "{findings:?}");
+        let Some(LoadVoltageModel::Zip {
+            q_constant_current,
+            q_constant_impedance,
+            ..
+        }) = &back.loads()[0].voltage_model
+        else {
+            panic!("reactive voltage dependence was discarded");
+        };
+        assert!((q_constant_current + 0.3).abs() < 1e-12);
+        assert!((q_constant_impedance - 0.3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn exponential_reference_voltage_and_coefficient_losses_are_diagnosed() {
+        let mut net = two_bus_network();
+        net.loads_mut()[0].voltage_model = Some(LoadVoltageModel::Exponential {
+            p: 12.0,
+            q: 4.0,
+            v_nom: Some(0.9),
+            gamma_p: 2.0,
+            gamma_q: 1.0,
+        });
+        let emitted = write_ravens_json(&net);
+        let findings = emitted.render_diagnostics();
+        assert!(
+            findings.iter().any(|finding| {
+                finding.contains("EMIT.RAVENS.FIELD_DROPPED")
+                    && finding.contains("exponential v_nom=")
+            }),
+            "{findings:?}"
+        );
+        assert!(
+            findings.iter().any(|finding| {
+                finding.contains("EMIT.RAVENS.VALUE_COLLAPSED")
+                    && finding.contains("exponential coefficients")
+            }),
+            "{findings:?}"
+        );
+        let (back, _) = parse_ravens_json(&emitted.text).unwrap();
+        assert!(matches!(
+            back.loads()[0].voltage_model,
+            Some(LoadVoltageModel::Exponential { v_nom: None, .. })
+        ));
     }
 
     #[test]

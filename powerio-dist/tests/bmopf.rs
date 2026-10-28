@@ -2097,6 +2097,46 @@ fn center_tap_emits_bmopf_convention_and_star_leakage() {
 }
 
 #[test]
+fn unequal_center_tap_pair_leakages_keep_explicit_zeros() {
+    for xsc in [[2.04, 0.0, 0.0], [0.0, 2.04, 0.0], [2.0, 10.0, 2.0]] {
+        let mut net = parse_dss_file(fixture("micro/xfmr_center_tap.dss")).unwrap();
+        net.transformers_mut()[0].xsc_pct = xsc.to_vec();
+        let original = &net.transformers()[0];
+        let base = original.windings[0].v_ref.powi(2) / original.windings[0].s_rating;
+        for profile in [BmopfSchemaVersion::Bmopf020, BmopfSchemaVersion::Bmopf010] {
+            let output = emit_bmopf_json_with_options(
+                &net,
+                BmopfEmitOptions::default().with_schema_version(profile),
+            );
+            let doc: serde_json::Value = serde_json::from_str(&output.text).unwrap();
+            assert!(schema_validator_for(profile).is_valid(&doc), "{doc}");
+            let encoded = if profile == BmopfSchemaVersion::Bmopf020 {
+                &doc["transformer"]["n_winding"]["t1"]
+            } else {
+                &doc["extras"]["transformer"]["n_winding"]["t1"]
+            };
+            for (pair, expected) in ["1_2", "1_3", "2_3"].into_iter().zip(xsc) {
+                let actual = encoded["x_sc"][pair].as_f64().unwrap();
+                assert!((actual - expected / 100.0 * base).abs() < 1e-12);
+            }
+            let back = parse_bmopf_str(&output.text).unwrap();
+            let transformer = &back.transformers()[0];
+            for (actual, expected) in transformer.xsc_pct.iter().zip(xsc) {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+            for (actual, expected) in transformer.windings.iter().zip(&original.windings) {
+                assert_eq!(actual.bus, expected.bus);
+                assert_eq!(actual.terminal_map, expected.terminal_map);
+                assert_eq!(actual.conn, expected.conn);
+                assert!((actual.v_ref - expected.v_ref).abs() < 1e-12);
+                assert!((actual.s_rating - expected.s_rating).abs() < 1e-12);
+                assert!((actual.r_pct - expected.r_pct).abs() < 1e-12);
+            }
+        }
+    }
+}
+
+#[test]
 fn bmopf_center_tap_canonical_order_rebuilds_dss_grounded_center() {
     let text = r#"{
         "bus": {
@@ -2342,7 +2382,7 @@ fn center_tap_negative_star_arm_warns_and_falls_back_schema_valid() {
         "Clear\n\
          New Circuit.ct basekv=7.2 pu=1.0 phases=1 bus1=src.1\n\
          New Transformer.t1 phases=1 windings=3 buses=(src.1.0, lv.1.0, lv.0.2) \
-         kvs=(7.2 0.12 0.12) kvas=(25 25 25) %Rs=(1 2 2) xhl=2 xht=10 xlt=2\n",
+         kvs=(7.2 0.12 0.12) kvas=(25 25 25) %Rs=(1 2 2) xhl=2 xht=2 xlt=6\n",
     );
     let out = emit_bmopf_json(&net);
     assert_eq!(errors(&schema_validator(), &out.text), Vec::<String>::new());
@@ -2353,7 +2393,7 @@ fn center_tap_negative_star_arm_warns_and_falls_back_schema_valid() {
     );
     assert_eq!(
         diag.details()["xsc_pct"],
-        serde_json::json!([2.0, 10.0, 2.0])
+        serde_json::json!([2.0, 2.0, 6.0])
     );
     assert_eq!(
         diag.details()["emitted_percentages"],

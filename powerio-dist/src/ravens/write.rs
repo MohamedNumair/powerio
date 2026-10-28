@@ -55,6 +55,7 @@ pub(crate) fn emit_ravens_json_text(net: &MulticonductorNetwork) -> TextEmission
         responses: BTreeMap::new(),
         profiles: BTreeMap::new(),
         bases: bus_bases(net),
+        equipment_bases: BTreeMap::new(),
     };
     let doc = w.document(net);
     TextEmission::new(
@@ -142,19 +143,17 @@ fn is_hot(terminal: &str) -> bool {
     terminal_phase(terminal) != Some("N")
 }
 
-/// The phase code of a terminal map whose conductors read as CIM letters in
-/// `PhaseCode` order (A, B, C, then N), which is the only order a code
-/// states; `None` for any other map.
+/// PhaseCode states a set; ordering belongs to phase records, not this enum.
+/// Repeated or unknown conductors cannot be represented as a phase set.
 fn canonical_code(map: &[String]) -> Option<String> {
-    let mut letters: Vec<&str> = Vec::new();
+    let mut letters = BTreeSet::new();
     for t in map {
         let letter = terminal_phase(t)?;
-        if letters.last().is_some_and(|last| *last >= letter) {
+        if !letters.insert(letter) {
             return None;
         }
-        letters.push(letter);
     }
-    Some(letters.concat())
+    (!letters.is_empty()).then(|| letters.into_iter().collect::<String>())
 }
 
 /// The CIM phase letters for a terminal map, in map order, neutral included.
@@ -165,7 +164,12 @@ fn letters(map: &[String]) -> Vec<&'static str> {
 /// `PhaseCode.<letters>` over the map's hot terminals (the convention the
 /// upstream equipment terminals carry).
 fn hot_code(map: &[String]) -> String {
-    let hot: String = letters(map).into_iter().filter(|l| *l != "N").collect();
+    let hot: String = letters(map)
+        .into_iter()
+        .filter(|l| *l != "N")
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     format!("PhaseCode.{hot}")
 }
 
@@ -173,7 +177,11 @@ fn hot_code(map: &[String]) -> String {
 /// which can sit on the neutral alone (a grounding bank), where `hot_code`
 /// would render an empty, un-invertible code.
 fn neutral_inclusive_code(map: &[String]) -> String {
-    let all: String = letters(map).into_iter().collect();
+    let all: String = letters(map)
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
     format!("PhaseCode.{all}")
 }
 
@@ -209,9 +217,30 @@ struct Writer {
     profiles: BTreeMap<String, Value>,
     /// Propagated nominal line-to-line volts per bus id (lowercased).
     bases: BTreeMap<String, f64>,
+    /// Equipment reference voltages may differ from the voltage of their bus.
+    equipment_bases: BTreeMap<String, f64>,
 }
 
 impl Writer {
+    fn warn_nonuniform(&mut self, what: &str, field: &str, values: &[f64]) {
+        if values
+            .windows(2)
+            .any(|p| (p[0] - p[1]).abs() > 1e-9 * p[0].abs().max(p[1].abs()).max(1.0))
+        {
+            self.warn(&C::EMIT_RAVENS_DIST_VALUE_COLLAPSED, format!(
+                "{what}: unequal per-phase {field} cannot be stated by one scalar; values are collapsed"
+            ));
+        }
+    }
+    fn representable_map(&mut self, what: &str, map: &[String]) -> bool {
+        if canonical_code(map).is_some() {
+            return true;
+        }
+        self.warn(&C::EMIT_RAVENS_DIST_RECORD_DROPPED, format!(
+            "{what}: terminal map {map:?} contains repeated or unsupported CIM phase identities; record dropped"
+        ));
+        false
+    }
     fn warn(&mut self, info: &'static crate::diagnostics::DiagnosticInfo, msg: impl Into<String>) {
         self.warnings.push(info, msg);
     }
@@ -295,8 +324,17 @@ impl Writer {
 
     /// Register (once) the voltage-bound limit set for a bus and return its
     /// name.
-    fn voltage_limit_set(&mut self, low: f64, high: f64, normal: Option<f64>) -> String {
-        let name = format!("OpLimV_{}-{}", fdisp(low), fdisp(high));
+    fn voltage_limit_set(
+        &mut self,
+        low: Option<f64>,
+        high: Option<f64>,
+        normal: Option<f64>,
+    ) -> String {
+        let name = format!(
+            "OpLimV_{}-{}",
+            low.map_or_else(|| "none".into(), fdisp),
+            high.map_or_else(|| "none".into(), fdisp)
+        );
         if !self.limit_sets.contains_key(&name) {
             let mut set = identified("OperationalLimitSet", &name, None);
             let entry = |w: &mut Writer, suffix: &str, value: f64, ty: &'static str| {
@@ -314,10 +352,13 @@ impl Writer {
                 w.used_types.insert(ty);
                 Value::Object(lim)
             };
-            let values = vec![
-                entry(self, "RangeAlow", low, TYPE_V_LOW),
-                entry(self, "RangeAhigh", high, TYPE_V_HIGH),
-            ];
+            let mut values = Vec::new();
+            if let Some(low) = low {
+                values.push(entry(self, "RangeAlow", low, TYPE_V_LOW));
+            }
+            if let Some(high) = high {
+                values.push(entry(self, "RangeAhigh", high, TYPE_V_HIGH));
+            }
             set.insert(
                 "OperationalLimitSet.OperationalLimitValue".into(),
                 Value::Array(values),
@@ -408,6 +449,11 @@ impl Writer {
             .bases
             .values()
             .map(|&v| (format!("BaseV_{}", fdisp(v / 1e3)), v))
+            .chain(
+                self.equipment_bases
+                    .iter()
+                    .map(|(name, &v)| (name.clone(), v)),
+            )
             .collect();
         if !bases.is_empty() {
             let mut table = Map::new();
@@ -481,9 +527,42 @@ impl Writer {
     // Element tables
     // ------------------------------------------------------------------
 
+    #[allow(clippy::too_many_lines)] // matrix entries and their projection diagnostics belong together
     fn write_linecodes(&mut self, net: &MulticonductorNetwork) -> Map<String, Value> {
         let mut table = Map::new();
         for code in net.line_codes() {
+            let what = format!("linecode {}", code.name);
+            if let Some(limits) = &code.i_max {
+                self.warn_nonuniform(&what, "ampacity", limits);
+            }
+            if code.g_from != code.g_to || code.b_from != code.b_to {
+                self.warn(&C::EMIT_RAVENS_DIST_VALUE_COLLAPSED, format!(
+                    "{what}: unequal end shunts become a symmetric pi model with the same total admittance"
+                ));
+            }
+            if [
+                &code.r_series,
+                &code.x_series,
+                &code.g_from,
+                &code.g_to,
+                &code.b_from,
+                &code.b_to,
+            ]
+            .iter()
+            .any(|matrix| {
+                matrix.iter().enumerate().any(|(i, row)| {
+                    row.iter().enumerate().any(|(j, v)| {
+                        matrix
+                            .get(j)
+                            .and_then(|row| row.get(i))
+                            .is_some_and(|other| (v - other).abs() > 0.0)
+                    })
+                })
+            }) {
+                self.warn(&C::EMIT_RAVENS_DIST_VALUE_COLLAPSED, format!(
+                    "{what}: nonsymmetric conductor matrices are represented by their symmetric lower triangle"
+                ));
+            }
             if code.n_conductors > 4 {
                 self.warn(
                     &C::EMIT_RAVENS_DIST_VALUE_COLLAPSED,
@@ -562,10 +641,22 @@ impl Writer {
         table
     }
 
+    #[allow(clippy::too_many_lines)] // terminal order, impedance references and limits form one record
     fn write_lines(&mut self, net: &MulticonductorNetwork) -> Map<String, Value> {
         let mut table = Map::new();
         for line in net.lines() {
             let what = format!("line {}", line.name);
+            if !self.representable_map(&what, &line.terminal_map_from)
+                || !self.representable_map(&what, &line.terminal_map_to)
+            {
+                continue;
+            }
+            if line.terminal_map_from.len() > 1 && line.terminal_map_from != line.terminal_map_to {
+                self.warn(&C::EMIT_RAVENS_DIST_RECORD_DROPPED, format!(
+                    "{what}: different multi-conductor terminal maps cannot be stated by ACLineSegmentPhase; record dropped"
+                ));
+                continue;
+            }
             let mut obj = identified("ACLineSegment", &line.name, extras_mrid(&line.extras));
             obj.insert("Equipment.inService".into(), Value::Bool(true));
             if let Some((key, value)) = self.base_pointer(&line.bus_from) {
@@ -675,6 +766,14 @@ impl Writer {
         let mut table = Map::new();
         for s in net.switches() {
             let what = format!("switch {}", s.name);
+            if let Some(limits) = &s.i_max {
+                self.warn_nonuniform(&what, "ampacity", limits);
+            }
+            if !self.representable_map(&what, &s.terminal_map_from)
+                || !self.representable_map(&what, &s.terminal_map_to)
+            {
+                continue;
+            }
             let mut obj = identified("Switch", &s.name, extras_mrid(&s.extras));
             obj.insert("Equipment.inService".into(), Value::Bool(true));
             obj.insert("Switch.open".into(), Value::Bool(s.open));
@@ -699,14 +798,14 @@ impl Writer {
                     &s.name,
                     1,
                     &s.bus_from,
-                    &hot_code(&s.terminal_map_from),
+                    &neutral_inclusive_code(&s.terminal_map_from),
                     limit.as_deref(),
                 ),
                 terminal(
                     &s.name,
                     2,
                     &s.bus_to,
-                    &hot_code(&s.terminal_map_to),
+                    &neutral_inclusive_code(&s.terminal_map_to),
                     limit.as_deref(),
                 ),
             ];
@@ -715,7 +814,9 @@ impl Writer {
                 Value::Array(terminals),
             );
 
-            if s.terminal_map_from != s.terminal_map_to {
+            // Always state conductor pairing, including the neutral and
+            // noncanonical ordering, independently of the terminal phase set.
+            {
                 let sides: Vec<Value> = s
                     .terminal_map_from
                     .iter()
@@ -747,6 +848,9 @@ impl Writer {
         let mut table = Map::new();
         for load in net.loads() {
             let what = format!("load {}", load.name);
+            if !self.representable_map(&what, &load.terminal_map) {
+                continue;
+            }
             let mut obj = identified("EnergyConsumer", &load.name, extras_mrid(&load.extras));
             let p: f64 = load.p_nom.iter().sum();
             let q: f64 = load.q_nom.iter().sum();
@@ -768,7 +872,32 @@ impl Writer {
                 && neutral_grounded(net, &load.bus);
             obj.insert("EnergyConsumer.grounded".into(), Value::Bool(grounded));
             obj.insert("Equipment.inService".into(), Value::Bool(true));
-            if let Some((key, value)) = self.base_pointer(&load.bus) {
+            if let Some(&v) = load.voltage_model.v_nom().first() {
+                let base = if delta { v } else { v * 3f64.sqrt() };
+                let base = stable_fixed(base, |b| {
+                    if delta {
+                        b
+                    } else {
+                        (b / 3f64.sqrt()) * 3f64.sqrt()
+                    }
+                });
+                let name = format!("BaseV_{}", fdisp(base / 1e3));
+                self.equipment_bases.insert(name.clone(), base);
+                obj.insert(
+                    "ConductingEquipment.BaseVoltage".into(),
+                    pointer("BaseVoltage", &name),
+                );
+                if load
+                    .voltage_model
+                    .v_nom()
+                    .iter()
+                    .any(|other| (other - v).abs() > 1e-9 * v.abs().max(1.0))
+                {
+                    self.warn(&C::EMIT_RAVENS_DIST_VALUE_COLLAPSED, format!(
+                        "{what}: unequal per-phase nominal voltages; the first phase represents the load"
+                    ));
+                }
+            } else if let Some((key, value)) = self.base_pointer(&load.bus) {
                 obj.insert(key, value);
             }
             obj.insert(
@@ -786,12 +915,36 @@ impl Writer {
             }
             self.attach_profile(load, &mut obj, net);
 
-            let hot: Vec<&'static str> = load
+            let mut hot: Vec<&'static str> = load
                 .terminal_map
                 .iter()
                 .filter_map(|t| terminal_phase(t))
                 .filter(|l| *l != "N")
                 .collect();
+            if delta {
+                let conductors = hot.clone();
+                hot = (0..load.p_nom.len())
+                    .filter_map(|k| {
+                        let a = *conductors.get(k)?;
+                        let b = *conductors.get((k + 1) % conductors.len())?;
+                        match (a, b) {
+                            ("A", "B") | ("B", "A") => Some("A"),
+                            ("B", "C") | ("C", "B") => Some("B"),
+                            ("C", "A") | ("A", "C") => Some("C"),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                if hot.len() != load.p_nom.len() || hot.is_empty() {
+                    self.warn(
+                        &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
+                        format!(
+                            "{what}: delta branch geometry has no CIM phase mapping; record dropped"
+                        ),
+                    );
+                    continue;
+                }
+            }
             let phases: Vec<Value> = hot
                 .iter()
                 .enumerate()
@@ -835,7 +988,14 @@ impl Writer {
                 &load.name,
                 1,
                 &load.bus,
-                &hot_code(&load.terminal_map),
+                &format!(
+                    "PhaseCode.{}",
+                    hot.iter()
+                        .copied()
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect::<String>()
+                ),
                 limit.as_deref(),
             )];
             obj.insert(
@@ -972,6 +1132,8 @@ impl Writer {
             } => {
                 let name = format!("{}_response", load.name);
                 let what = format!("load {}", load.name);
+                self.warn_nonuniform(&what, "active voltage exponent", gamma_p);
+                self.warn_nonuniform(&what, "reactive voltage exponent", gamma_q);
                 let mut lrc = identified("LoadResponseCharacteristic", &name, None);
                 lrc.insert(
                     "LoadResponseCharacteristic.exponentModel".into(),
@@ -1058,6 +1220,9 @@ impl Writer {
         let mut table = Map::new();
         for shunt in net.shunts() {
             let what = format!("shunt {}", shunt.name);
+            if !self.representable_map(&what, &shunt.terminal_map) {
+                continue;
+            }
             let mut obj = identified(
                 "LinearShuntCompensator",
                 &shunt.name,
@@ -1168,10 +1333,35 @@ impl Writer {
         table
     }
 
+    #[allow(clippy::too_many_lines)] // ratings, limits, configuration and dispatch form one record
     fn write_machines(&mut self, net: &MulticonductorNetwork) -> Map<String, Value> {
         let mut table = Map::new();
         for machine in net.generators() {
             let what = format!("generator {}", machine.name);
+            self.warn_nonuniform(&what, "active power", &machine.p_nom);
+            self.warn_nonuniform(&what, "reactive power", &machine.q_nom);
+            for (field, values) in [
+                ("p_min", &machine.p_min),
+                ("p_max", &machine.p_max),
+                ("q_min", &machine.q_min),
+                ("q_max", &machine.q_max),
+            ] {
+                if let Some(values) = values {
+                    self.warn_nonuniform(&what, field, values);
+                }
+            }
+            if !self.representable_map(&what, &machine.terminal_map) {
+                continue;
+            }
+            if machine.configuration == Configuration::Delta
+                || (machine.configuration == Configuration::SinglePhase
+                    && machine.terminal_map.last().is_none_or(|t| is_hot(t)))
+            {
+                self.warn(&C::EMIT_RAVENS_DIST_RECORD_DROPPED, format!(
+                    "{what}: delta generator connection has no distribution-profile field; record dropped"
+                ));
+                continue;
+            }
             let mut obj = identified(
                 "SynchronousMachine",
                 &machine.name,
@@ -1259,6 +1449,27 @@ impl Writer {
         let mut table = Map::new();
         for ibr in net.ibrs() {
             let what = format!("ibr {}", ibr.name);
+            self.warn_nonuniform(&what, "apparent-power rating", &ibr.s_max);
+            for (field, values) in [
+                ("p_min", &ibr.p_min),
+                ("p_max", &ibr.p_max),
+                ("q_min", &ibr.q_min),
+                ("q_max", &ibr.q_max),
+                ("i_max", &ibr.i_max),
+            ] {
+                if let Some(values) = values {
+                    self.warn_nonuniform(&what, field, values);
+                }
+            }
+            if !self.representable_map(&what, &ibr.terminal_map) {
+                continue;
+            }
+            if ibr.terminal_map.last().is_none_or(|t| is_hot(t)) {
+                self.warn(&C::EMIT_RAVENS_DIST_RECORD_DROPPED, format!(
+                    "{what}: inverter connection without a neutral return has no distribution-profile field; record dropped"
+                ));
+                continue;
+            }
             let mut obj = identified(
                 "PowerElectronicsConnection",
                 &ibr.name,
@@ -1412,6 +1623,15 @@ impl Writer {
         let mut table = Map::new();
         for source in net.sources() {
             let what = format!("vsource {}", source.name);
+            if source.energy_cost_rate.is_some() {
+                self.warn(
+                    &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
+                    format!("{what}: energy_cost_rate has no distribution-profile field; dropped"),
+                );
+            }
+            if !self.representable_map(&what, &source.terminal_map) {
+                continue;
+            }
             let mut obj = identified("EnergySource", &source.name, extras_mrid(&source.extras));
             let hot: Vec<usize> = source
                 .terminal_map
@@ -1446,7 +1666,10 @@ impl Writer {
             // One magnitude and angle represent the source; warn when the
             // per-terminal values do not follow the positive-sequence n-gon
             // the reader will regenerate.
-            let uneven = hot.iter().enumerate().any(|(i, &k)| {
+            let uneven = hot.windows(2).any(|pair| {
+                terminal_phase(&source.terminal_map[pair[0]])
+                    >= terminal_phase(&source.terminal_map[pair[1]])
+            }) || hot.iter().enumerate().any(|(i, &k)| {
                 let mag_dev = source.v_magnitude.get(k).map_or(0.0, |m| (m - v_ln).abs());
                 let expected = wrap_angle(angle - std::f64::consts::TAU / n * i as f64);
                 let ang_dev = source.v_angle.get(k).map_or(0.0, |a| (a - expected).abs());
@@ -1589,6 +1812,13 @@ impl Writer {
         let mut assets = Map::new();
         for xf in net.transformers() {
             let what = format!("transformer {}", xf.name);
+            if xf
+                .windings
+                .iter()
+                .any(|w| !self.representable_map(&what, &w.terminal_map))
+            {
+                continue;
+            }
             if xf.windings.len() < 2 {
                 self.warn(
                     &C::EMIT_RAVENS_DIST_RECORD_DROPPED,
@@ -1800,9 +2030,11 @@ impl Writer {
 
     fn bus_voltage_limit(&mut self, net: &MulticonductorNetwork, bus: &str) -> Option<String> {
         let b = net.bus(bus)?;
-        let (low, high) = (b.v_min?, b.v_max?);
+        if b.v_min.is_none() && b.v_max.is_none() {
+            return None;
+        }
         let normal = self.base_of(bus);
-        Some(self.voltage_limit_set(low, high, normal))
+        Some(self.voltage_limit_set(b.v_min, b.v_max, normal))
     }
 
     #[allow(clippy::too_many_lines)] // one node writes in one pass: limits, ground, location
@@ -1815,9 +2047,9 @@ impl Writer {
         let mut grounds = Map::new();
         for bus in net.buses() {
             let mut obj = identified("ConnectivityNode", &bus.id, extras_mrid(&bus.extras));
-            if let (Some(low), Some(high)) = (bus.v_min, bus.v_max) {
+            if bus.v_min.is_some() || bus.v_max.is_some() {
                 let normal = self.base_of(&bus.id);
-                let set = self.voltage_limit_set(low, high, normal);
+                let set = self.voltage_limit_set(bus.v_min, bus.v_max, normal);
                 obj.insert(
                     "ConnectivityNode.OperationalLimitSet".into(),
                     pointer("OperationalLimitSet", &set),

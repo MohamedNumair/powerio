@@ -42,7 +42,7 @@
   MATHEMATICAL model carries no winding power rating. A load without a
   nominal voltage takes the bus base and an island no stated base reaches
   takes a load's nominal voltage, each with a finding. The tests compare the
-  writer field by field against PMD v0.16 exports of four PMD cases, vendored
+  writer field by field against PMD v0.16 exports of five PMD cases, vendored
   under `tests/data/dist/pmd/math/` (BSD-3), and hold write, read, write to
   byte identity. The ENGINEERING reader points a MATHEMATICAL document at the
   new token.
@@ -53,12 +53,28 @@
 - OpenDSS writer: a network whose name is empty writes `Circuit.converted`,
   as a nameless one does, instead of `New Circuit.`.
 - The `.json` classifier sends a document with PMD's `data_model` marker to
-  the PMD readers even when its tables are shaped like PowerModels', and tells
-  the two MG-RAVENS profiles apart by their top level tables.
+  the PMD readers even when its tables are shaped like PowerModels'. RAVENS
+  profile detection reads decoded class identities and class containers;
+  object names and descriptive text do not select a profile.
 - The conversion matrix gains the MG-RAVENS profiles and PMD MATHEMATICAL
   JSON as formats and the MG-RAVENS example and a PMD two winding case as
   cases; an OpenDSS readback in the matrix now loads the bus coordinate
   sidecar, and the report names the codes of any error severity finding.
+- RAVENS preserves disabled voltage regulators, isolated bus voltage bases,
+  distribution source impedance, finite transformer neutral impedance,
+  conductor order, and load voltage references. Unsupported representations
+  produce specific findings. PMD MATHEMATICAL restores eliminated transformer
+  neutrals, keeps degree/radian and shunt-unit conventions, and preserves
+  leakage impedance and unbounded ratings when recovering transformers.
+  Malformed allocation dimensions are rejected before matrix construction.
+- Independent validation now checks fresh RAVENS output through PowerIO IR
+  against the pinned native schema and converter profile, and compares
+  RAVENS-mediated PSS/E and PowSybl imports with direct native imports.
+  The conversion matrix retains fixture-labelled field differences and tests
+  electrical changes independently of unrelated metadata warnings.
+- The additive source-format catalog uses `pio-ir/2/0.11.8/schema.json`.
+  The released 0.11.7 snapshot stays byte exact; IR version 2 and C ABI 7
+  remain unchanged.
 
 ## 0.11.7
 

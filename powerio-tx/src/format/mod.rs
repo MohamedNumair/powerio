@@ -1618,11 +1618,19 @@ fn warn_dropped_exchange_context(
             | TargetFormat::PandapowerJson
             | TargetFormat::Pslf
             | TargetFormat::SurgeJson
+            | TargetFormat::RavensJson
             | TargetFormat::Ucte
     ) {
         return;
     }
-    if let Some(message) = exchange_context_loss(net, format.label()) {
+    let message = if format == TargetFormat::RavensJson {
+        // MG-RAVENS carries stable component identities as mRIDs, but not
+        // the source-neutral topology hierarchy or case/solver metadata.
+        exchange_context_loss_with_identity_policy(net, format.label(), true)
+    } else {
+        exchange_context_loss(net, format.label())
+    };
+    if let Some(message) = message {
         conv.push(&format.emit_family().field_dropped, message);
     }
 }
@@ -1630,8 +1638,16 @@ fn warn_dropped_exchange_context(
 /// Describe the source-neutral network context absent from a target format.
 /// One diagnostic represents one format boundary even when the detailed model
 /// contains many CIM or IIDM objects.
-#[allow(clippy::too_many_lines)] // one inventory counts every exchange-context family
 pub(super) fn exchange_context_loss(net: &BalancedNetwork, target: &str) -> Option<String> {
+    exchange_context_loss_with_identity_policy(net, target, false)
+}
+
+#[allow(clippy::too_many_lines)] // one inventory counts every exchange-context family
+fn exchange_context_loss_with_identity_policy(
+    net: &BalancedNetwork,
+    target: &str,
+    preserves_identities: bool,
+) -> Option<String> {
     let mut dropped = Vec::new();
     let metadata = net.case_metadata();
     let mut metadata_fields = Vec::new();
@@ -1749,7 +1765,7 @@ pub(super) fn exchange_context_loss(net: &BalancedNetwork, target: &str) -> Opti
             .iter()
             .filter(|value| value.uid.is_some())
             .count();
-    if source_uids > 0 {
+    if source_uids > 0 && !preserves_identities {
         dropped.push(format!(
             "{source_uids} source-assigned stable component identity value(s)"
         ));
@@ -2538,6 +2554,35 @@ mpc.branch = [
         assert!(message.contains("case_date"), "{message}");
         assert!(message.contains("detailed_connectivity"), "{message}");
         assert!(message.contains("1 source-assigned"), "{message}");
+
+        let ravens = emit_value_text(&net, TargetFormat::RavensJson).unwrap();
+        let context = ravens
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code() == "EMIT.RAVENS.FIELD_DROPPED"
+                    && diagnostic.message().contains("grid exchange context")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(context.len(), 1, "{:?}", ravens.render_diagnostics());
+        let message = context[0].message();
+        assert!(message.contains("case_date"), "{message}");
+        assert!(message.contains("detailed_connectivity"), "{message}");
+        assert!(!message.contains("source-assigned"), "{message}");
+        let reparsed = parse_str(&ravens.text, "ravens-json").unwrap().network;
+        assert_eq!(reparsed.buses()[0].uid.as_deref(), Some("source-bus"));
+
+        *net.case_metadata_mut() = crate::network::CaseMetadata::default();
+        *net.detailed_connectivity_mut() = None;
+        let ravens = emit_value_text(&net, TargetFormat::RavensJson).unwrap();
+        assert!(
+            ravens
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message().contains("grid exchange context")),
+            "retained identities alone are not a loss: {:?}",
+            ravens.render_diagnostics()
+        );
     }
 
     #[test]

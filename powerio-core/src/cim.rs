@@ -49,8 +49,8 @@ pub fn terminal_phase(terminal: &str) -> Option<&'static str> {
 }
 
 /// Expand a `PhaseCode.<code>` or `OrderedPhaseCodeKind.<code>` value into
-/// its letters: `ABCN` gives `A`, `B`, `C`, `N`, and `s1s2N` gives `s1`,
-/// `s2`, `N`. Letters outside the kind are skipped.
+/// its letters: `ABCN` gives `A`, `B`, `C`, `N`, and `s12N` (or the
+/// `s1s2N` spelling) gives `s1`, `s2`, `N`. Letters outside the kind are skipped.
 #[must_use]
 pub fn expand_phase_code(code: &str) -> Vec<String> {
     let code = code.rsplit('.').next().unwrap_or(code);
@@ -62,6 +62,10 @@ pub fn expand_phase_code(code: &str) -> Vec<String> {
             's' => {
                 if let Some(d) = chars.next() {
                     out.push(format!("s{d}"));
+                    if d == '1' && chars.peek() == Some(&'2') {
+                        chars.next();
+                        out.push("s2".to_owned());
+                    }
                 }
             }
             _ => {}
@@ -128,21 +132,58 @@ pub mod ravens {
         }
     }
 
-    /// The profile of MG-RAVENS JSON text, from the class names it carries:
-    /// as hash table keys and as `Ravens.cimObjectType` values, both of which
-    /// appear as quoted strings. The scan is one pass over the text with no
-    /// allocation per class, so routing costs no document parse.
+    /// The profile of MG-RAVENS JSON text, from decoded
+    /// `Ravens.cimObjectType` values and the schema's class containers.
+    /// Object names and ordinary string properties do not select a profile.
+    /// Malformed or excessively nested JSON defaults to the balanced route,
+    /// whose reader reports the JSON error; the decoder keeps its depth limit.
     #[must_use]
     pub fn detect_profile(text: &str) -> Profile {
-        let has = |markers: &[&str]| {
-            markers
-                .iter()
-                .any(|marker| text.contains(&format!("\"{marker}\"")))
+        use serde_json::Value;
+
+        let Ok(root) = serde_json::from_str::<Value>(text) else {
+            return Profile::Balanced;
         };
-        match (has(&BALANCED_MARKERS), has(&MULTICONDUCTOR_MARKERS)) {
+        // These are structural containers in the MG-RAVENS schema, not
+        // arbitrary hash keys: ConnectivityNode["TransformerTank"], for
+        // example, names a bus and is not a transformer class statement.
+        let mut balanced = root
+            .get("ProducerCostFunction")
+            .is_some_and(Value::is_object);
+        let mut multiconductor = root
+            .get("PerLengthLineParameter")
+            .is_some_and(Value::is_object)
+            || root
+                .get("AssetInfo")
+                .and_then(|info| info.get("WireSpacingInfo"))
+                .is_some_and(Value::is_object);
+        visit_classes(&root, &mut balanced, &mut multiconductor);
+        match (balanced, multiconductor) {
             (true, true) => Profile::Mixed,
             (false, true) => Profile::Multiconductor,
             _ => Profile::Balanced,
+        }
+    }
+
+    fn visit_classes(value: &serde_json::Value, balanced: &mut bool, multiconductor: &mut bool) {
+        use serde_json::Value;
+
+        match value {
+            Value::Object(object) => {
+                if let Some(kind) = object.get("Ravens.cimObjectType").and_then(Value::as_str) {
+                    *balanced |= BALANCED_MARKERS.contains(&kind);
+                    *multiconductor |= MULTICONDUCTOR_MARKERS.contains(&kind);
+                }
+                for child in object.values() {
+                    visit_classes(child, balanced, multiconductor);
+                }
+            }
+            Value::Array(items) => {
+                for child in items {
+                    visit_classes(child, balanced, multiconductor);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -184,6 +225,8 @@ mod tests {
         assert_eq!(expand_phase_code("PhaseCode.ABCN"), ["A", "B", "C", "N"]);
         assert_eq!(expand_phase_code("OrderedPhaseCodeKind.CA"), ["C", "A"]);
         assert_eq!(expand_phase_code("PhaseCode.s1s2N"), ["s1", "s2", "N"]);
+        assert_eq!(expand_phase_code("PhaseCode.s12"), ["s1", "s2"]);
+        assert_eq!(expand_phase_code("PhaseCode.s12N"), ["s1", "s2", "N"]);
         assert_eq!(expand_phase_code("A"), ["A"]);
     }
 
@@ -217,5 +260,67 @@ mod tests {
             detect_profile(r#"{"a":"PerLengthPhaseImpedance::'lc'","PowerTransformerEnd.r":1}"#),
             Profile::Balanced
         );
+    }
+
+    #[test]
+    fn ravens_profiles_ignore_names_and_descriptions() {
+        use ravens::{Profile, detect_profile};
+        for marker in ravens::MULTICONDUCTOR_MARKERS {
+            let text = serde_json::json!({
+                "ConnectivityNode": {marker: {
+                    "Ravens.cimObjectType": "ConnectivityNode",
+                    "IdentifiedObject.name": marker,
+                    "IdentifiedObject.description": marker
+                }},
+                "MySettings": {"Ravens.cimObjectType": "AlgorithmSettings"}
+            });
+            assert_eq!(
+                detect_profile(&text.to_string()),
+                Profile::Balanced,
+                "{marker}"
+            );
+        }
+        for marker in ravens::BALANCED_MARKERS {
+            let text = serde_json::json!({
+                "ConnectivityNode": {marker: {"IdentifiedObject.description": marker}},
+                "PerLengthLineParameter": {}
+            });
+            assert_eq!(
+                detect_profile(&text.to_string()),
+                Profile::Multiconductor,
+                "{marker}"
+            );
+        }
+    }
+
+    #[test]
+    fn ravens_profiles_decode_escapes_and_structural_containers() {
+        use ravens::{Profile, detect_profile};
+        for text in [
+            r#"{"PerLengthLine\u0050arameter":{}}"#,
+            r#"{"AssetInfo":{"WireSpacing\u0049nfo":{}}}"#,
+            r#"{"x":{"Ravens.cimObject\u0054ype":"ACLineSegment\u0050hase"}}"#,
+        ] {
+            assert_eq!(detect_profile(text), Profile::Multiconductor, "{text}");
+        }
+        assert_eq!(detect_profile(r#"{"AssetInfo":{}}"#), Profile::Balanced);
+        assert_eq!(
+            detect_profile(r#"{"ProducerCost\u0046unction":{},"PerLengthLineParameter":{}}"#),
+            Profile::Mixed
+        );
+    }
+
+    #[test]
+    fn malformed_ravens_profile_input_is_bounded() {
+        use ravens::{Profile, detect_profile};
+        for text in [
+            "",
+            "{",
+            r#"{"Ravens.cimObjectType":"TransformerTank"} trailing"#,
+        ] {
+            assert_eq!(detect_profile(text), Profile::Balanced);
+        }
+        let text = format!("{}null{}", "[".repeat(2048), "]".repeat(2048));
+        assert_eq!(detect_profile(&text), Profile::Balanced);
     }
 }
