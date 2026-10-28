@@ -2142,9 +2142,9 @@ fn distribution_target_projection(
                     // Eliminating a grounded neutral cannot reverse a winding.
                     // Preserve the original transformer circuit for the physical
                     // check instead of sharing the writer's winding projection.
-                    let transformers = held.transformers().clone();
-                    held = reduced.into_parts().0;
-                    *held.transformers_mut() = transformers;
+                    let mut projected = reduced.into_parts().0;
+                    restore_transformer_circuits(&held, &mut projected);
+                    held = projected;
                 }
                 Err(error) => cell.failures.push(format!(
                     "{label}: output claims Kron reduction but the source does not permit it: {error}"
@@ -2153,6 +2153,41 @@ fn distribution_target_projection(
         }
     }
     held
+}
+
+/// Retain each winding's original orientation and the grounding identity of
+/// its eliminated return. Reintroducing a perfectly grounded port adds no
+/// electrical degree of freedom; forgetting its grounding would instead
+/// compare terminal 4 against earth as though they were different nodes.
+fn restore_transformer_circuits(
+    original: &MulticonductorNetwork,
+    projected: &mut MulticonductorNetwork,
+) {
+    projected
+        .transformers_mut()
+        .clone_from(original.transformers());
+    for winding in original.transformers().iter().flat_map(|t| &t.windings) {
+        let Some(source_bus) = original.bus(&winding.bus) else {
+            continue;
+        };
+        let Some(bus) = projected
+            .buses_mut()
+            .iter_mut()
+            .find(|bus| bus.id.eq_ignore_ascii_case(&winding.bus))
+        else {
+            continue;
+        };
+        for terminal in &winding.terminal_map {
+            if source_bus.grounded.contains(terminal) {
+                if !bus.terminals.contains(terminal) {
+                    bus.terminals.push(terminal.clone());
+                }
+                if !bus.grounded.contains(terminal) {
+                    bus.grounded.push(terminal.clone());
+                }
+            }
+        }
+    }
 }
 
 /// This vendored BMOPF source declares a single-phase transformer with three
@@ -2591,6 +2626,33 @@ fn matrix_model_change_details_are_not_truncated_at_the_corpus_limit() {
     let differences = all_model_diffs(&before, &resized);
     assert!(differences.iter().any(|d| d.path == "[0]"));
     assert!(differences.iter().any(|d| d.path == "[39]"));
+}
+
+#[test]
+fn kron_projection_preserves_ground_identity_without_waiving_winding_orientation() {
+    let original = load_distribution_case(
+        data("dist/pmd/math/ut_trans_2w_yy_math.json"),
+        "pmd-math-json",
+    )
+    .unwrap()
+    .network;
+    let mut projected =
+        powerio_dist::neutral_kron_reduce(&original, &powerio_dist::NeutralKronOptions::default())
+            .unwrap()
+            .into_parts()
+            .0;
+    restore_transformer_circuits(&original, &mut projected);
+    assert_eq!(
+        electrical_projection::differences(&original, &projected),
+        Vec::<String>::new()
+    );
+    let terminals = &mut projected.transformers_mut()[0].windings[0].terminal_map;
+    let last = terminals.len() - 1;
+    terminals.swap(0, last);
+    assert_ne!(
+        electrical_projection::differences(&original, &projected),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
