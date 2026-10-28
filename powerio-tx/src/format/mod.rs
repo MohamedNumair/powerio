@@ -128,9 +128,6 @@ pub enum TargetFormat {
     Goc3Json,
     /// Surge native JSON network document.
     SurgeJson,
-    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema
-    /// (<https://github.com/lanl-ansi/MG-RAVENS>), balanced subset.
-    RavensJson,
     /// One JSON document from a DeepMind OPFData release. Read only except for
     /// an exact emission back to the retained source format.
     DeepMindOpfDataJson,
@@ -142,6 +139,9 @@ pub enum TargetFormat {
     Cgmes,
     /// ENTSO-E UCTE-DEF `.uct`; fresh output uses revision 2007.05.01.
     Ucte,
+    /// MG-RAVENS JSON, the LANL CIM-derived interchange schema
+    /// (<https://github.com/lanl-ansi/MG-RAVENS>), balanced subset.
+    RavensJson,
 }
 
 impl TargetFormat {
