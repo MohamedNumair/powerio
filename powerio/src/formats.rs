@@ -89,6 +89,16 @@ pub fn grid_formats() -> impl Iterator<Item = GridFormatInfo> {
             true,
         ),
         ("pmd-json", "PMD JSON", Distribution, true),
+        ("pmd-math-json", "PMD MATHEMATICAL JSON", Distribution, true),
+        // One token for both MG-RAVENS profiles: a balanced document parses
+        // to a BalancedNetwork and a multiconductor one to a
+        // MulticonductorNetwork, by content.
+        (
+            "ravens-json",
+            "MG-RAVENS JSON (balanced and multiconductor profiles)",
+            Distribution,
+            true,
+        ),
         (
             "bmopf-json",
             "BMOPF JSON (detect version)",
@@ -205,6 +215,7 @@ pub fn resolve_format(name: &str) -> Option<FormatInfo> {
             "gridlabd" => info("gridlabd", Some("glm"), true, true),
             "gridlabd-arras" => info("gridlabd-arras", Some("glm"), true, true),
             "pmd-json" => info("pmd-json", Some("json"), false, true),
+            "pmd-math-json" => info("pmd-math-json", Some("json"), false, true),
             "bmopf-json" => info("bmopf-json", Some("json"), false, true),
             "cim-dist" => info("cim-dist", Some("xml"), false, true),
             _ => return None,

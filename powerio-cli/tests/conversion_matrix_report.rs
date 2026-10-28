@@ -188,6 +188,15 @@ fn warning_level(segment: &str, leg: Leg) -> Option<(Level, String)> {
         // The sources are all written, but the BMOPF formulation reads only
         // one of them.
         "SOURCE_COUNT" => (Level::Approximate, "source"),
+        // An unbalanced source is written as one single phase source per
+        // conductor: the same terminal phasors, more source records.
+        "SOURCE_SPLIT" => (Level::Approximate, "source"),
+        // A three phase wye-wye transformer becomes one BMOPF unit per
+        // phase: the same windings, more transformer records.
+        "TRANSFORMER_WYE_WYE_DECOMPOSED" => (Level::Approximate, "transformer"),
+        // Untyped source objects pass through the neutral reduction
+        // unchanged; they stay source only.
+        "KRON_UNTYPED_RETAINED" => (Level::Dropped, "untyped"),
         _ => {
             let stem = segment
                 .strip_suffix("_DROPPED")
@@ -264,6 +273,8 @@ struct Grade {
     unclassified: BTreeSet<String>,
     /// Findings at error severity.
     errors: usize,
+    /// Their codes, for the report.
+    error_codes: BTreeSet<String>,
     /// The typed model changed while no finding said so.
     unreported_change: bool,
 }
@@ -300,6 +311,12 @@ impl Cell {
             .iter()
             .filter(|(level, _)| *level == Level::Failed)
             .count();
+        let error_codes: BTreeSet<String> = self
+            .findings
+            .iter()
+            .filter(|(_, d)| d.severity() == DiagnosticSeverity::Error)
+            .map(|(_, d)| d.code().to_owned())
+            .collect();
         let unreported_change = level <= Level::Restated && !self.model_diffs.is_empty();
         if unreported_change || !self.failures.is_empty() {
             level = Level::Failed;
@@ -322,6 +339,7 @@ impl Cell {
             codes,
             unclassified,
             errors,
+            error_codes,
             unreported_change,
         }
     }
@@ -358,7 +376,16 @@ fn cell_problems(cell: &Cell, grade: &Grade, expected: Option<&str>) -> Vec<Stri
         ));
     }
     if grade.errors > 0 {
-        problems.push(format!("{} finding(s) at error severity", grade.errors));
+        problems.push(format!(
+            "{} finding(s) at error severity: {}",
+            grade.errors,
+            grade
+                .error_codes
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
     let observed = grade.baseline_value();
     if expected != Some(observed.as_str()) {
@@ -687,6 +714,9 @@ fn sanitize_report_text_handles_multibyte_whitespace_before_generated_dss_dir() 
 
 struct TextEmission {
     text: String,
+    /// The other artifacts of the emission (an OpenDSS bus coordinate file),
+    /// by file name, which a readback of the text needs beside it.
+    sidecars: Vec<(String, String)>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -698,22 +728,43 @@ fn text_emission(
     let powerio_core::EmittedOutput::Memory { artifacts } = result.into_output() else {
         return Err("memory destination returned path output".to_owned());
     };
-    let mut primary = None;
+    let mut texts = Vec::new();
     for artifact in artifacts {
-        let is_primary =
-            primary_suffix.is_none_or(|suffix| artifact.name().as_str().ends_with(suffix));
-        if is_primary {
-            if primary.is_some() {
-                return Err("emission returned several primary artifacts".to_owned());
-            }
-            primary = Some(
-                String::from_utf8(artifact.into_bytes())
-                    .map_err(|err| format!("emitted text is not UTF-8: {err}"))?,
-            );
+        let name = artifact.name().as_str().to_owned();
+        let text = String::from_utf8(artifact.into_bytes())
+            .map_err(|err| format!("emitted text is not UTF-8: {err}"))?;
+        texts.push((name, text));
+    }
+    // The case text. A same format OpenDSS echo of a project with sidecars
+    // returns the retained files under `source/` behind a redirect stub at
+    // the destination; the retained case file is the text then.
+    let candidates: Vec<usize> = texts
+        .iter()
+        .enumerate()
+        .filter(|(_, (name, _))| primary_suffix.is_none_or(|suffix| name.ends_with(suffix)))
+        .map(|(i, _)| i)
+        .collect();
+    let chosen = match candidates.as_slice() {
+        [one] => *one,
+        [] => return Err("emission returned no primary artifact".to_owned()),
+        several => *several
+            .iter()
+            .find(|i| texts[**i].0.contains("source/"))
+            .ok_or_else(|| "emission returned several primary artifacts".to_owned())?,
+    };
+    let mut primary = None;
+    let mut sidecars = Vec::new();
+    for (i, (name, text)) in texts.into_iter().enumerate() {
+        if i == chosen {
+            primary = Some(text);
+        } else {
+            let file = name.rsplit('/').next().unwrap_or(&name).to_owned();
+            sidecars.push((file, text));
         }
     }
     Ok(TextEmission {
         text: primary.ok_or_else(|| "emission returned no primary artifact".to_owned())?,
+        sidecars,
         diagnostics,
     })
 }
@@ -840,7 +891,7 @@ fn emit_distribution_module(
 ) -> Result<TextEmission, String> {
     let destination = powerio_core::Destination::memory("case").map_err(|err| err.to_string())?;
     let result = powerio_dist::emit(module, target, destination).map_err(|err| err.to_string())?;
-    let suffix = (target == DistTargetFormat::Dss).then_some("case.dss");
+    let suffix = (target == DistTargetFormat::Dss).then_some(".dss");
     text_emission(result, suffix)
 }
 
@@ -932,7 +983,7 @@ const fn read_only(
 /// Every 0.11 transmission format. The writable ones are both source rows and
 /// target columns, in this order; the read only ones are source rows only and
 /// come last, so a target column index indexes this array directly.
-const TRANSMISSION_FORMATS: [TransmissionFormat; 19] = [
+const TRANSMISSION_FORMATS: [TransmissionFormat; 20] = [
     transmission("MATPOWER .m", "matpower", Emission::Document, Family::Case),
     transmission(
         "PowerModels JSON",
@@ -961,6 +1012,12 @@ const TRANSMISSION_FORMATS: [TransmissionFormat; 19] = [
         Family::Case,
     ),
     transmission("Surge JSON", "surge-json", Emission::Document, Family::Case),
+    transmission(
+        "MG-RAVENS JSON (balanced)",
+        "ravens-json",
+        Emission::Document,
+        Family::Case,
+    ),
     transmission("PSLF .epc", "pslf", Emission::Document, Family::Case),
     transmission("XIIDM 1.17", "xiidm", Emission::Document, Family::Exchange),
     transmission("JIIDM 1.17", "jiidm", Emission::Document, Family::Exchange),
@@ -1509,7 +1566,7 @@ struct DistributionFormat {
     target: DistTargetFormat,
 }
 
-const DISTRIBUTION_FORMATS: [DistributionFormat; 3] = [
+const DISTRIBUTION_FORMATS: [DistributionFormat; 5] = [
     DistributionFormat {
         name: "OpenDSS .dss",
         token: "dss",
@@ -1525,9 +1582,19 @@ const DISTRIBUTION_FORMATS: [DistributionFormat; 3] = [
         token: "pmd-json",
         target: DistTargetFormat::PmdJson,
     },
+    DistributionFormat {
+        name: "MG-RAVENS JSON (multiconductor)",
+        token: "ravens-json",
+        target: DistTargetFormat::RavensJson,
+    },
+    DistributionFormat {
+        name: "PMD MATHEMATICAL JSON",
+        token: "pmd-math-json",
+        target: DistTargetFormat::PmdMathJson,
+    },
 ];
 
-const DISTRIBUTION_CASES: [(&str, &str, DistributionFormat); 7] = [
+const DISTRIBUTION_CASES: [(&str, &str, DistributionFormat); 9] = [
     (
         "single phase transformer",
         "dist/micro/xfmr_single_phase.dss",
@@ -1562,6 +1629,16 @@ const DISTRIBUTION_CASES: [(&str, &str, DistributionFormat); 7] = [
         "PMD four wire",
         "dist/pmd/fourwire_linecode.json",
         DISTRIBUTION_FORMATS[2],
+    ),
+    (
+        "MG-RAVENS case3",
+        "dist/ravens/case3_balanced.json",
+        DISTRIBUTION_FORMATS[3],
+    ),
+    (
+        "PMD MATH two winding",
+        "dist/pmd/math/ut_trans_2w_yy_math.json",
+        DISTRIBUTION_FORMATS[4],
     ),
 ];
 
@@ -1642,8 +1719,17 @@ fn run_distribution_matrix() -> Matrix {
             match &payloads {
                 Ok(payloads) => {
                     for payload in payloads {
+                        if !representable(payload.label, target.target) {
+                            continue;
+                        }
                         let diagonal = source_idx == target_idx;
-                        validate_distribution_pair(payload, *target, diagonal, &mut cell);
+                        validate_distribution_pair(
+                            payload,
+                            source.name,
+                            *target,
+                            diagonal,
+                            &mut cell,
+                        );
                     }
                 }
                 Err(err) => cell.failures.push(err.clone()),
@@ -1663,6 +1749,15 @@ fn run_distribution_matrix() -> Matrix {
     }
 }
 
+/// Whether a case has a statement in a target at all. MG-RAVENS names a
+/// conductor by its CIM phase identity (A, B, C, N), so a line or load on a
+/// fifth conductor has none; its writer reports and drops them, which the
+/// core check would otherwise read as a lost load. Every other pair is
+/// representable and is held to the core.
+fn representable(label: &str, target: DistTargetFormat) -> bool {
+    !(label == "ten conductor linecode" && target == DistTargetFormat::RavensJson)
+}
+
 fn distribution_payloads(format: DistributionFormat) -> Result<Vec<DistributionPayload>, String> {
     DISTRIBUTION_CASES
         .iter()
@@ -1671,7 +1766,7 @@ fn distribution_payloads(format: DistributionFormat) -> Result<Vec<DistributionP
                 .map_err(|err| format!("parse {rel}: {err}"))?;
             *base.network.source_format_mut() = None;
             let rendered = emit_distribution_value(&base.network, format.target)?;
-            let parsed = parse_distribution_text(&rendered.text, format)
+            let parsed = parse_distribution_text(&rendered, format)
                 .map_err(|err| format!("read generated {rel} as {}: {err}", format.name))?;
             let core =
                 distribution_core(&source_equivalents::contract_source_pairs(&parsed.network));
@@ -1694,6 +1789,7 @@ fn distribution_payloads(format: DistributionFormat) -> Result<Vec<DistributionP
 /// column already shows.
 fn validate_distribution_pair(
     payload: &DistributionPayload,
+    row: &str,
     target: DistributionFormat,
     diagonal: bool,
     cell: &mut Cell,
@@ -1717,7 +1813,7 @@ fn validate_distribution_pair(
         }
         cell.echo_exact = Some(cell.echo_exact.unwrap_or(true) && echoed);
     }
-    match parse_distribution_text(&conversion.text, target) {
+    match parse_distribution_text(&conversion, target) {
         Ok(parsed) => {
             if !echoed {
                 cell.record(Leg::Readback, &parsed.diagnostics);
@@ -1727,7 +1823,7 @@ fn validate_distribution_pair(
             source_equivalents::assert_source_constraints(
                 &before,
                 &after,
-                &format!("{} to {}", payload.label, target.name),
+                &format!("{} as {row} to {}", payload.label, target.name),
             );
             let actual = distribution_core(&after);
             if !core_survives(&payload.core, &actual, target.target) {
@@ -1774,27 +1870,39 @@ fn load_distribution_case(
     powerio_dist::parse(source).map(dist_module_to_parsed)
 }
 
+/// Read an emission back. OpenDSS text goes through a file of its own, with
+/// the emission's sidecars (a bus coordinate file the text includes) beside
+/// it, in a directory per call so the two tests of this file do not race.
 fn parse_distribution_text(
-    text: &str,
+    emission: &TextEmission,
     format: DistributionFormat,
 ) -> Result<DistParsed, powerio_core::Error> {
     if format.target != DistTargetFormat::Dss {
-        let source = powerio_core::Source::from_memory("<memory>", text.as_bytes().to_vec())?
-            .with_format(powerio_core::FormatId::new(
-                format.token.to_ascii_lowercase().replace('_', "-"),
-            )?);
+        let source =
+            powerio_core::Source::from_memory("<memory>", emission.text.as_bytes().to_vec())?
+                .with_format(powerio_core::FormatId::new(
+                    format.token.to_ascii_lowercase().replace('_', "-"),
+                )?);
         return powerio_dist::parse(source).map(dist_module_to_parsed);
     }
 
-    let dir = std::env::temp_dir().join("powerio-conversion-matrix");
+    let dir = std::env::temp_dir()
+        .join("powerio-conversion-matrix")
+        .join(format!(
+            "case-{}-{}",
+            std::process::id(),
+            DSS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join(format!(
-        "case-{}.dss",
-        DSS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::write(&path, text).unwrap();
+    // Not `case.dss`: a same format echo returns the retained file under
+    // its own name beside the destination's `case.dss`.
+    let path = dir.join("input.dss");
+    std::fs::write(&path, &emission.text).unwrap();
+    for (file, text) in &emission.sidecars {
+        std::fs::write(dir.join(file), text).unwrap();
+    }
     let parsed = load_distribution_case(&path, format.token);
-    let _ = std::fs::remove_file(path);
+    let _ = std::fs::remove_dir_all(dir);
     parsed
 }
 

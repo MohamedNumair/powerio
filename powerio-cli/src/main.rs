@@ -714,6 +714,9 @@ enum FormatArg {
     /// PowerModelsDistribution ENGINEERING JSON (parse and emit).
     #[value(name = "pmd-json", alias = "pmd", alias = "engineering")]
     PmdJson,
+    /// PowerModelsDistribution MATHEMATICAL JSON (parse and emit).
+    #[value(name = "pmd-math-json", alias = "pmd-math", alias = "mathematical")]
+    PmdMathJson,
     /// IEEE BMOPF JSON distribution case (parse and emit).
     #[value(name = "bmopf-json", alias = "bmopf")]
     BmopfJson,
@@ -769,6 +772,7 @@ impl FormatArg {
             | FormatArg::Gridlabd
             | FormatArg::GridlabdArras
             | FormatArg::PmdJson
+            | FormatArg::PmdMathJson
             | FormatArg::BmopfJson
             | FormatArg::Bmopf010
             | FormatArg::Bmopf020
@@ -777,21 +781,27 @@ impl FormatArg {
     }
 
     /// Reader-family selection includes formats without a fresh writer.
+    /// MG-RAVENS is excluded: its two profiles share the token, so the
+    /// facade picks the family from the document.
     fn is_distribution_input(self) -> bool {
-        self.distribution().is_some() || self == Self::SincalMulticonductor
+        (self.distribution().is_some() && self != Self::RavensJson)
+            || self == Self::SincalMulticonductor
     }
 
     /// The distribution target, or `None` outside that family. For every
     /// writable format exactly one of this and [`FormatArg::transmission`]
     /// is `Some`, so adding one without wiring its family is a compile
-    /// error; gridfm is read only and returns `None` from both.
+    /// error; gridfm is read only and returns `None` from both. MG-RAVENS is
+    /// the one format in both: its token writes either network kind.
     fn distribution(self) -> Option<powerio_dist::DistTargetFormat> {
         use powerio_dist::DistTargetFormat;
         match self {
+            FormatArg::RavensJson => Some(DistTargetFormat::RavensJson),
             FormatArg::Dss => Some(DistTargetFormat::Dss),
             FormatArg::Gridlabd => Some(DistTargetFormat::Gridlabd),
             FormatArg::GridlabdArras => Some(DistTargetFormat::GridlabdArras),
             FormatArg::PmdJson => Some(DistTargetFormat::PmdJson),
+            FormatArg::PmdMathJson => Some(DistTargetFormat::PmdMathJson),
             FormatArg::BmopfJson | FormatArg::Bmopf010 | FormatArg::Bmopf020 => {
                 Some(DistTargetFormat::BmopfJson)
             }
@@ -816,7 +826,6 @@ impl FormatArg {
             | FormatArg::Goc3Json
             | FormatArg::SurgeJson
             | FormatArg::DeepMindOpfDataJson
-            | FormatArg::RavensJson
             | FormatArg::Gridfm
             | FormatArg::Pwb
             | FormatArg::IeeeCdf
@@ -858,6 +867,7 @@ impl FormatArg {
             FormatArg::Gridlabd => "gridlabd",
             FormatArg::GridlabdArras => "gridlabd-arras",
             FormatArg::PmdJson => "pmd-json",
+            FormatArg::PmdMathJson => "pmd-math-json",
             FormatArg::BmopfJson => "bmopf-json",
             FormatArg::Bmopf010 => "bmopf-json@0.1.0",
             FormatArg::Bmopf020 => "bmopf-json@0.2.0",
@@ -3569,6 +3579,12 @@ fn parse_family_case(input: &Path, from: Option<FormatArg>) -> anyhow::Result<Fa
         let f = stdin_format(from)?;
         let source = module_io::declare_format(stdin_source()?, Some(f.name()))
             .context("declaring the standard input format")?;
+        if f == FormatArg::RavensJson {
+            // Both MG-RAVENS profiles share the token; the facade reads the
+            // family from the document.
+            let module = powerio::parse(source).context("reading standard input")?;
+            return module_family_case(input, module);
+        }
         return if f.is_distribution_input() {
             let net = powerio::dist::parse(source).context("reading standard input")?;
             Ok(FamilyCase::Distribution(Box::new(net)))
@@ -3585,6 +3601,12 @@ fn parse_family_case(input: &Path, from: Option<FormatArg>) -> anyhow::Result<Fa
                 "gridfm datasets are read by `convert --from gridfm` or the `gridfm` \
                  subcommand, not this command",
             ));
+        }
+        if f == FormatArg::RavensJson {
+            return module_family_case(
+                input,
+                load_module_with_selection(input, Some(f), &SincalCliOptions::default())?,
+            );
         }
         return if f.is_distribution_input() {
             let net = module_io::load_multiconductor_module(input, Some(f.name()))

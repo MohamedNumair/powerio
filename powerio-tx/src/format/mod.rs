@@ -90,12 +90,12 @@ pub use pypsa::{
 
 pub use cgmes::CgmesVersion;
 pub(crate) use egret::write_egret_json;
-pub use ravens::{parse_ravens_json, write_ravens_json};
 pub(crate) use pandapower::write_pandapower_json;
 pub(crate) use powermodels::write_powermodels_json;
 pub(crate) use powerworld::write_powerworld;
 pub(crate) use pslf::write_pslf;
 pub(crate) use psse::write_psse_rev;
+pub(crate) use ravens::write_ravens_json;
 pub(crate) use rawx::write_rawx;
 pub(crate) use surge::write_surge_json;
 pub(crate) use xiidm::{write_jiidm, write_xiidm};
@@ -931,8 +931,8 @@ pub(crate) fn reject_empty_case(net: &BalancedNetwork, format: &'static str) -> 
 pub const SOURCE_FORMAT_NAMES: &str = "matpower/m, powermodels-json/powermodels/pm, \
      egret-json/egret, psse/raw, psse34, psse35, psse-rawx/rawx, powerworld/aux, \
      pandapower-json/pandapower/pp, pslf/epc, pypsa-csv/pypsa, pwb, goc3-json/goc3, \
-     surge-json/surge, opfdata-json/opfdata/gridopt, xiidm/iidm, jiidm, cgmes, ucte/uct, \
-     ieee-cdf/cdf";
+     surge-json/surge, ravens-json/ravens/mg-ravens, opfdata-json/opfdata/gridopt, xiidm/iidm, \
+     jiidm, cgmes, ucte/uct, ieee-cdf/cdf";
 
 /// An unrecognized source format token. When the token names a distribution
 /// format (`dss`, `pmd`, `bmopf`), the error points at the distribution
@@ -2366,6 +2366,7 @@ mod tests {
             TF::Pwb,
             TF::Goc3Json,
             TF::SurgeJson,
+            TF::RavensJson,
             TF::DeepMindOpfDataJson,
             TF::Ucte,
             TF::Xiidm,
@@ -2554,6 +2555,7 @@ mpc.branch = [
             (SourceFormat::Pslf, TargetFormat::Pslf),
             (SourceFormat::Goc3Json, TargetFormat::Goc3Json),
             (SourceFormat::SurgeJson, TargetFormat::SurgeJson),
+            (SourceFormat::RavensJson, TargetFormat::RavensJson),
             (SourceFormat::Ucte, TargetFormat::Ucte),
             (
                 SourceFormat::DeepMindOpfDataJson,

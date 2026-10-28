@@ -8,14 +8,15 @@
 //! them in place and every other target warns about them by name.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 use serde_json::{Map, Value};
 
+use crate::diagnostics::codes as C;
 use crate::model::{
-    Configuration, DistBus, DistGenerator, DistIbr, DistLine, DistLineCode, DistLoad,
-    DistLoadVoltageModel, DistNetwork, DistShunt, DistSourceFormat, DistSwitch, DistTransformer,
-    Extras, IbrPrimeMover, IbrTopology, Mat, UntypedObject, VoltageSource, Winding, WindingConn,
+    ConductorMatrix, Configuration, DistBus, DistGenerator, DistIbr, DistLine, DistLineCode,
+    DistLoad, DistLoadVoltageModel, DistShunt, DistSourceFormat, DistSwitch, DistTransformer,
+    DistWinding, DistWindingConn, Extras, IbrPrimeMover, IbrTopology, MulticonductorNetwork,
+    MulticonductorNetworkTables, UntypedObject, VoltageSource,
 };
 use crate::{Error, Result};
 
@@ -23,37 +24,16 @@ use super::{MRID_KEY, NORMAL_OPEN_KEY, natural_key, phase_terminal};
 
 const FMT: &str = "MG-RAVENS";
 
-/// Object types that only appear in balanced (transmission-profile) RAVENS
-/// documents — the MATPOWER-derived conventions the `powerio` crate reads.
-/// Their presence routes the whole document away from this multiconductor
-/// reader.
-const BALANCED_TYPES: [&str; 3] = [
-    "AlgorithmSettings",
-    "ProducerCostFunction",
-    "PowerTransformerEnd",
-];
-
-/// Parse an MG-RAVENS JSON file into a [`DistNetwork`].
-///
-/// # Errors
-/// [`Error::Io`] when the file cannot be read; otherwise as
-/// [`parse_ravens_str`].
-pub fn parse_ravens_file(path: impl AsRef<std::path::Path>) -> Result<DistNetwork> {
-    let path = path.as_ref();
-    let text = std::fs::read_to_string(path).map_err(|source| Error::Io {
-        path: path.display().to_string(),
-        source,
-    })?;
-    parse_ravens_str(&text)
-}
-
-/// Parse an in-memory MG-RAVENS JSON document into a [`DistNetwork`].
+/// Parse an in-memory MG-RAVENS JSON document into a
+/// [`MulticonductorNetwork`], recording the reader's findings in `diags`.
 ///
 /// # Errors
 /// [`Error::Json`] on malformed JSON, a non-object top level, or a balanced
-/// transmission-profile document (which belongs to the `powerio` crate's
-/// reader).
-pub fn parse_ravens_str(text: &str) -> Result<DistNetwork> {
+/// transmission-profile document (which belongs to the `powerio-tx` reader).
+pub(crate) fn parse_ravens_collecting(
+    text: &str,
+    diags: &mut crate::collect::Diagnostics,
+) -> Result<MulticonductorNetwork> {
     let root_value: Value = serde_json::from_str(text).map_err(|e| Error::Json {
         format: FMT,
         message: e.to_string(),
@@ -70,21 +50,27 @@ pub fn parse_ravens_str(text: &str) -> Result<DistNetwork> {
 
     let mut mapper = Mapper {
         doc: &doc,
-        net: DistNetwork::new(),
+        net: MulticonductorNetwork::from_tables(MulticonductorNetworkTables {
+            source_format: Some(DistSourceFormat::RavensJson),
+            base_frequency: crate::dss::defaults::BASE_FREQUENCY,
+            ..MulticonductorNetworkTables::default()
+        }),
+        diagnostics: crate::diagnostics::Diagnostics::new(),
         node_terminals: BTreeMap::new(),
         node_grounded: BTreeSet::new(),
+        node_grounds: BTreeMap::new(),
         consumed: BTreeSet::new(),
     };
-    mapper.net.warnings.push(
+    mapper.warn(
+        &C::READ_RAVENS_VALUE_DEFAULTED,
         "MG-RAVENS carries no system frequency; base_frequency assumes the OpenDSS default \
-         (60 Hz)"
-            .into(),
+         (60 Hz)",
     );
     mapper.run();
 
-    let mut net = mapper.net;
-    net.source = Some(Arc::new(text.to_owned()));
-    net.source_format = Some(DistSourceFormat::RavensJson);
+    let net = mapper.net;
+    diags.absorb(mapper.diagnostics);
+    crate::model::warn_unresolved_references(&net, diags);
     Ok(net)
 }
 
@@ -364,7 +350,7 @@ fn limit_set(doc: &Doc, set_name: &str) -> Limits {
 }
 
 fn reject_balanced(doc: &Doc) -> Result<()> {
-    let found: Vec<&str> = BALANCED_TYPES
+    let found: Vec<&str> = powerio_core::cim::ravens::BALANCED_MARKERS
         .iter()
         .filter(|t| doc.objects.iter().any(|o| &o.kind == *t))
         .copied()
@@ -389,22 +375,27 @@ fn reject_balanced(doc: &Doc) -> Result<()> {
 
 struct Mapper<'a> {
     doc: &'a Doc,
-    net: DistNetwork,
+    net: MulticonductorNetwork,
+    /// The reader's findings, flushed into the caller's collector once the
+    /// parse is done.
+    diagnostics: crate::diagnostics::Diagnostics,
     /// Terminal numbers each connectivity node was seen with.
     node_terminals: BTreeMap<String, BTreeSet<u8>>,
     node_grounded: BTreeSet<String>,
+    /// Grounded terminals a `Ground` states per connectivity node.
+    node_grounds: BTreeMap<String, Vec<String>>,
     /// Concrete kinds a typed mapping claimed (nested helpers included).
     consumed: BTreeSet<&'static str>,
 }
 
 impl Mapper<'_> {
-    fn warn(&mut self, msg: impl Into<String>) {
-        self.net.warnings.push(msg.into());
+    fn warn(&mut self, info: &'static crate::diagnostics::DiagnosticInfo, msg: impl Into<String>) {
+        self.diagnostics.push(info, msg);
     }
 
     fn defaulted(&mut self, class: &str, name: &str, field: &'static str) {
         self.net
-            .defaulted
+            .defaulted_mut()
             .entry(format!("{class}.{name}"))
             .or_default()
             .push(field);
@@ -459,6 +450,7 @@ impl Mapper<'_> {
         self.map_power_electronics();
         self.map_sources();
         self.map_transformers();
+        self.map_grounds();
         self.finish_buses();
         self.preserve_unclaimed();
     }
@@ -498,12 +490,13 @@ impl Mapper<'_> {
             );
             if n == 0 {
                 let name = obj.name.clone();
-                self.warn(format!(
-                    "PerLengthPhaseImpedance {name}: no impedance rows; linecode skipped"
-                ));
+                self.warn(
+                    &C::READ_RAVENS_RECORD_DROPPED,
+                    format!("PerLengthPhaseImpedance {name}: no impedance rows; linecode skipped"),
+                );
                 continue;
             }
-            let zero: Mat = vec![vec![0.0; n]; n];
+            let zero: ConductorMatrix = vec![vec![0.0; n]; n];
             let (mut r_mat, mut x_mat, mut b_mat, mut g_mat) =
                 (zero.clone(), zero.clone(), zero.clone(), zero);
             for &(row, col, rv, xv, bv, gv) in &rows {
@@ -523,7 +516,7 @@ impl Mapper<'_> {
             }
             // The π-model shunt halves at each end; division by two is exact,
             // so the writer's `b_from + b_to` reproduces the source bits.
-            let half = |m: &Mat| -> Mat {
+            let half = |m: &ConductorMatrix| -> ConductorMatrix {
                 m.iter()
                     .map(|row| row.iter().map(|v| v / 2.0).collect())
                     .collect()
@@ -535,7 +528,7 @@ impl Mapper<'_> {
             code.g_from = half(&g_mat);
             code.g_to = half(&g_mat);
             code.extras = extras_with_mrid(obj);
-            self.net.linecodes.push(code);
+            self.net.line_codes_mut().push(code);
         }
     }
 
@@ -594,7 +587,9 @@ impl Mapper<'_> {
             } else {
                 phase_rows.into_iter().map(|(_, l)| l).collect()
             };
-            let mut map = hot_terminals(&letters);
+            // Every conductor, the neutral included: a four wire segment
+            // has four `ACLineSegmentPhase` records.
+            let mut map = letters_to_terminals(&letters);
             if map.is_empty() {
                 let n = self
                     .net
@@ -622,7 +617,11 @@ impl Mapper<'_> {
                 if let Some(emerg) = limits.emerg_amps {
                     let n = map.len();
                     let mut conflicts = false;
-                    if let Some(code) = self.net.linecodes.iter_mut().find(|c| c.name == code_name)
+                    if let Some(code) = self
+                        .net
+                        .line_codes_mut()
+                        .iter_mut()
+                        .find(|c| c.name == code_name)
                     {
                         let proposed = vec![emerg; n.max(code.n_conductors)];
                         match &code.i_max {
@@ -632,28 +631,42 @@ impl Mapper<'_> {
                         }
                     }
                     if conflicts {
-                        self.warn(format!(
-                            "line {name}: emergency ampacity {emerg} conflicts with an \
+                        self.warn(
+                            &C::READ_RAVENS_VALUE_CONFLICT,
+                            format!(
+                                "line {name}: emergency ampacity {emerg} conflicts with an \
                              earlier line sharing linecode {code_name}; keeping the first \
                              value"
-                        ));
+                            ),
+                        );
                     }
                 }
             }
 
+            // The to terminal's own phase code, when it names as many
+            // phases, is that end's map (a lateral landing on another phase);
+            // otherwise both ends share the conductor order.
+            let map_to = {
+                let own = letters_to_terminals(&to.phases);
+                if !own.is_empty() && own.len() == map.len() {
+                    own
+                } else {
+                    map.clone()
+                }
+            };
             self.use_terminals(&from.node, &map);
-            self.use_terminals(&to.node, &map);
+            self.use_terminals(&to.node, &map_to);
             let mut line = DistLine::new(
                 name,
                 from.node.clone(),
                 to.node.clone(),
-                map.clone(),
                 map,
+                map_to,
                 code_name,
                 length,
             );
             line.extras = extras;
-            self.net.lines.push(line);
+            self.net.lines_mut().push(line);
         }
     }
 
@@ -719,10 +732,10 @@ impl Mapper<'_> {
 
             let open = fbool(obj, "Switch.open").unwrap_or(false);
             let mut extras = extras_with_mrid(obj);
-            if let Some(normal) = fbool(obj, "Switch.normalOpen") {
-                if normal != open {
-                    extras.insert(NORMAL_OPEN_KEY.into(), normal.into());
-                }
+            if let Some(normal) = fbool(obj, "Switch.normalOpen")
+                && normal != open
+            {
+                extras.insert(NORMAL_OPEN_KEY.into(), normal.into());
             }
             let i_max = from
                 .limit_set
@@ -748,7 +761,7 @@ impl Mapper<'_> {
             );
             switch.i_max = i_max;
             switch.extras = extras;
-            self.net.switches.push(switch);
+            self.net.switches_mut().push(switch);
         }
     }
 
@@ -826,7 +839,9 @@ impl Mapper<'_> {
 
             let conn = fstr(obj, "EnergyConsumer.phaseConnection").map_or("Y", kind_suffix);
             let delta = conn == "D";
-            let configuration = if phases == 1 && !delta {
+            // One phase is `SinglePhase` whether it returns on the neutral
+            // or spans two phase conductors, as the dss reader states it.
+            let configuration = if phases == 1 {
                 Configuration::SinglePhase
             } else if delta {
                 Configuration::Delta
@@ -843,16 +858,23 @@ impl Mapper<'_> {
                 if pair.len() == 2 {
                     map = pair;
                 } else {
-                    self.warn(format!(
-                        "load {name}: single-phase delta needs a two-phase terminal code; \
+                    self.warn(
+                        &C::READ_RAVENS_RECORD_DROPPED,
+                        format!(
+                            "load {name}: single-phase delta needs a two-phase terminal code; \
                          kept untyped"
-                    ));
+                        ),
+                    );
                     self.keep_untyped(obj, "unresolvable delta terminals");
                     continue;
                 }
-            } else if !delta && grounded {
+            } else if !delta {
+                // A wye load returns on the neutral terminal; `grounded`
+                // says whether that neutral is grounded at the node.
                 map.push("4".to_owned());
-                self.ground_node(&at.node);
+                if grounded {
+                    self.ground_node(&at.node);
+                }
             }
 
             let base = self.base_voltage(obj);
@@ -860,9 +882,10 @@ impl Mapper<'_> {
             let v_nom = if let Some(v) = v_phase {
                 vec![v; phases]
             } else {
-                self.warn(format!(
-                    "load {name}: no BaseVoltage; nominal voltage left unset"
-                ));
+                self.warn(
+                    &C::READ_RAVENS_VALUE_DEFAULTED,
+                    format!("load {name}: no BaseVoltage; nominal voltage left unset"),
+                );
                 Vec::new()
             };
             let voltage_model = self.load_voltage_model(obj, v_nom);
@@ -896,7 +919,7 @@ impl Mapper<'_> {
             );
             load.voltage_model = voltage_model;
             load.extras = extras;
-            self.net.loads.push(load);
+            self.net.loads_mut().push(load);
         }
     }
 
@@ -1004,19 +1027,25 @@ impl Mapper<'_> {
                 map
             };
             let n = map.len();
-            let delta = fstr(obj, "ShuntCompensator.phaseConnection").map(kind_suffix) == Some("D");
+            let kind = fstr(obj, "ShuntCompensator.phaseConnection").map(kind_suffix);
+            let delta = kind == Some("D");
+            // `Yn`: the bank's neutral is grounded at its node.
+            let grounded = kind == Some("Yn");
             if delta {
-                self.warn(format!(
-                    "shunt {name}: delta connection kept as per-phase diagonal susceptance; \
+                self.warn(
+                    &C::READ_RAVENS_VALUE_COLLAPSED,
+                    format!(
+                        "shunt {name}: delta connection kept as per-phase diagonal susceptance; \
                      the off-diagonal geometry is not reconstructed"
-                ));
+                    ),
+                );
             }
             let sections = fnum(obj, "ShuntCompensator.sections")
                 .or_else(|| fnum(obj, "ShuntCompensator.normalSections"))
                 .unwrap_or(1.0);
             let b_phase = f_or(obj, "LinearShuntCompensator.bPerSection", 0.0) * sections;
             let g_phase = f_or(obj, "LinearShuntCompensator.gPerSection", 0.0) * sections;
-            let diag = |v: f64| -> Mat {
+            let diag = |v: f64| -> ConductorMatrix {
                 (0..n)
                     .map(|i| (0..n).map(|j| if i == j { v } else { 0.0 }).collect())
                     .collect()
@@ -1042,7 +1071,7 @@ impl Mapper<'_> {
             }
             if delta {
                 extras.insert("conn".into(), "delta".into());
-            } else {
+            } else if grounded {
                 self.ground_node(&at.node);
             }
 
@@ -1050,7 +1079,7 @@ impl Mapper<'_> {
             let mut shunt =
                 DistShunt::new(name, at.node.clone(), map, diag(g_phase), diag(b_phase));
             shunt.extras = extras;
-            self.net.shunts.push(shunt);
+            self.net.shunts_mut().push(shunt);
         }
     }
 
@@ -1129,7 +1158,7 @@ impl Mapper<'_> {
             }
             machine.extras = extras;
             self.use_terminals(&at.node, &map);
-            self.net.generators.push(machine);
+            self.net.generators_mut().push(machine);
         }
     }
 
@@ -1173,10 +1202,13 @@ impl Mapper<'_> {
                 "PhotoVoltaicUnit" => IbrPrimeMover::Pv,
                 "BatteryUnit" => IbrPrimeMover::Battery,
                 _ => {
-                    self.warn(format!(
-                        "power electronics {name}: unit type `{unit_kind}` is not typed; \
+                    self.warn(
+                        &C::READ_RAVENS_VALUE_SUBSTITUTED,
+                        format!(
+                            "power electronics {name}: unit type `{unit_kind}` is not typed; \
                          treated as a generic inverter"
-                    ));
+                        ),
+                    );
                     IbrPrimeMover::Generic
                 }
             };
@@ -1241,19 +1273,19 @@ impl Mapper<'_> {
             // maxIFault is per-unit of rated current on the rated voltage.
             if let (Some(pu), Some(u)) =
                 (fnum(obj, "PowerElectronicsConnection.maxIFault"), rated_u)
+                && rated_s > 0.0
+                && u > 0.0
             {
-                if rated_s > 0.0 && u > 0.0 {
-                    let rated_amps = if phases == 1 {
-                        rated_s / u
-                    } else {
-                        rated_s / (3f64.sqrt() * u)
-                    };
-                    ibr.i_max = Some(vec![pu * rated_amps; phases]);
-                }
+                let rated_amps = if phases == 1 {
+                    rated_s / u
+                } else {
+                    rated_s / (3f64.sqrt() * u)
+                };
+                ibr.i_max = Some(vec![pu * rated_amps; phases]);
             }
             ibr.extras = extras;
             self.use_terminals(&at.node, &map);
-            self.net.ibrs.push(ibr);
+            self.net.ibrs_mut().push(ibr);
         }
     }
 
@@ -1289,8 +1321,8 @@ impl Mapper<'_> {
             } else {
                 magnitude / (2.0 * (std::f64::consts::PI / n).sin())
             };
-            let mut v_magnitude = vec![v_ln; phases];
-            let mut v_angle: Vec<f64> = (0..phases)
+            let v_magnitude = vec![v_ln; phases];
+            let v_angle: Vec<f64> = (0..phases)
                 .map(|k| {
                     let a = angle - std::f64::consts::TAU / n * k as f64;
                     let shifted = (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
@@ -1301,11 +1333,18 @@ impl Mapper<'_> {
                     }
                 })
                 .collect();
-            // The neutral conductor rides at ground.
+            // The hot terminals carry the phasors, the way the dss reader
+            // states a `Vsource`; a neutral the phase code names (a BMOPF
+            // source stating its neutral at 0 V) comes back as a terminal at
+            // 0 V. Grounding is a bus property the document does not state.
             let mut map = hot;
-            map.push("4".to_owned());
-            v_magnitude.push(0.0);
-            v_angle.push(0.0);
+            let mut v_magnitude = v_magnitude;
+            let mut v_angle = v_angle;
+            if at.phases.iter().any(|l| l == "N") {
+                map.push("4".to_owned());
+                v_magnitude.push(0.0);
+                v_angle.push(0.0);
+            }
 
             let mut extras = extras_with_mrid(obj);
             let nominal = fnum(obj, "EnergySource.nominalVoltage");
@@ -1329,10 +1368,9 @@ impl Mapper<'_> {
             }
 
             self.use_terminals(&at.node, &map);
-            self.ground_node(&at.node);
             let mut source = VoltageSource::new(name, at.node.clone(), map, v_magnitude, v_angle);
             source.extras = extras;
-            self.net.sources.push(source);
+            self.net.sources_mut().push(source);
         }
     }
 
@@ -1367,10 +1405,13 @@ impl Mapper<'_> {
                     .find(|o| o.name == n)
             });
             let Some(info) = info else {
-                self.warn(format!(
-                    "transformer tank {name}: no TransformerTankInfo datasheet; the tank has \
+                self.warn(
+                    &C::READ_RAVENS_RECORD_DROPPED,
+                    format!(
+                        "transformer tank {name}: no TransformerTankInfo datasheet; the tank has \
                      no voltages or impedances and is kept untyped"
-                ));
+                    ),
+                );
                 self.keep_untyped(tank, "missing datasheet");
                 continue;
             };
@@ -1414,9 +1455,10 @@ impl Mapper<'_> {
                 .unwrap_or_default();
             ends.sort_by_key(|(num, _)| *num);
             if ends.len() < 2 {
-                self.warn(format!(
-                    "transformer tank {name}: fewer than two ends; kept untyped"
-                ));
+                self.warn(
+                    &C::READ_RAVENS_RECORD_DROPPED,
+                    format!("transformer tank {name}: fewer than two ends; kept untyped"),
+                );
                 self.keep_untyped(tank, "fewer than two ends");
                 continue;
             }
@@ -1435,9 +1477,10 @@ impl Mapper<'_> {
                     .and_then(pointer_name)
                     .map(str::to_owned);
                 let Some(node) = node else {
-                    self.warn(format!(
-                        "transformer tank {name}: end {num} has no terminal; kept untyped"
-                    ));
+                    self.warn(
+                        &C::READ_RAVENS_RECORD_DROPPED,
+                        format!("transformer tank {name}: end {num} has no terminal; kept untyped"),
+                    );
                     ok = false;
                     break;
                 };
@@ -1449,10 +1492,13 @@ impl Mapper<'_> {
                     .map(super::expand_phase_code)
                     .unwrap_or_default();
                 let Some(einfo) = end_infos.get(num) else {
-                    self.warn(format!(
-                        "transformer tank {name}: end {num} has no TransformerEndInfo; \
+                    self.warn(
+                        &C::READ_RAVENS_RECORD_DROPPED,
+                        format!(
+                            "transformer tank {name}: end {num} has no TransformerEndInfo; \
                          kept untyped"
-                    ));
+                        ),
+                    );
                     ok = false;
                     break;
                 };
@@ -1461,27 +1507,30 @@ impl Mapper<'_> {
                     .get("TransformerEndInfo.connectionKind")
                     .and_then(Value::as_str)
                     .map_or("Y", kind_suffix);
-                let conn = match conn {
-                    "D" | "A" => WindingConn::Delta,
-                    "Y" | "Yn" | "I" => WindingConn::Wye,
-                    other => {
-                        self.warn(format!(
+                let conn =
+                    match conn {
+                        "D" | "A" => DistWindingConn::Delta,
+                        "Y" | "Yn" | "I" => DistWindingConn::Wye,
+                        other => {
+                            self.warn(&C::READ_RAVENS_VALUE_SUBSTITUTED, format!(
                             "transformer tank {name}: end {num} connection `{other}` is not \
                              typed; treated as wye"
                         ));
-                        WindingConn::Wye
-                    }
-                };
+                            DistWindingConn::Wye
+                        }
+                    };
                 if let Some(clock) = einfo
                     .get("TransformerEndInfo.phaseAngleClock")
                     .and_then(Value::as_u64)
+                    && clock != 0
                 {
-                    if clock != 0 {
-                        self.warn(format!(
+                    self.warn(
+                        &C::READ_RAVENS_FIELD_UNMAPPED,
+                        format!(
                             "transformer tank {name}: end {num} phaseAngleClock {clock} is \
-                             not modeled (the model carries no vector-group shift)"
-                        ));
-                    }
+                         not modeled (the model carries no vector-group shift)"
+                        ),
+                    );
                 }
 
                 let mut map = letters_to_terminals(&letters);
@@ -1490,7 +1539,7 @@ impl Mapper<'_> {
                     self.defaulted("transformer", &name, "phases");
                 }
                 let grounded = fbool_map(end, "TransformerEnd.grounded").unwrap_or(false);
-                if conn == WindingConn::Wye && grounded && !map.contains(&"4".to_owned()) {
+                if conn == DistWindingConn::Wye && grounded && !map.contains(&"4".to_owned()) {
                     map.push("4".to_owned());
                 }
                 let hot = map.iter().filter(|t| *t != "4").count();
@@ -1498,7 +1547,8 @@ impl Mapper<'_> {
 
                 let v_ref = iget("TransformerEndInfo.ratedU").unwrap_or(0.0);
                 let s_rating = iget("TransformerEndInfo.ratedS").unwrap_or(0.0);
-                let mut winding = Winding::new(node.clone(), map.clone(), conn, v_ref, s_rating);
+                let mut winding =
+                    DistWinding::new(node.clone(), map.clone(), conn, v_ref, s_rating);
                 let z_base = crate::model::n_winding_impedance_base(1, v_ref, s_rating);
                 if let (Some(r), Some(z_base)) = (iget("TransformerEndInfo.r"), z_base) {
                     winding.r_pct = r / z_base * 100.0;
@@ -1507,7 +1557,7 @@ impl Mapper<'_> {
                     get("TransformerEnd.rground").unwrap_or(0.0),
                     get("TransformerEnd.xground").unwrap_or(0.0),
                 );
-                if conn == WindingConn::Wye {
+                if conn == DistWindingConn::Wye {
                     if grounded {
                         // Solid grounding is the dss default; only a real
                         // impedance needs the explicit neutral fields.
@@ -1574,11 +1624,14 @@ impl Mapper<'_> {
                             xsc_pct[0] = z / z_base * 100.0;
                             found_sc = true;
                         } else if windings.len() > 2 {
-                            self.warn(format!(
-                                "transformer tank {name}: additional short-circuit test on \
+                            self.warn(
+                                &C::READ_RAVENS_FIELD_UNMAPPED,
+                                format!(
+                                    "transformer tank {name}: additional short-circuit test on \
                                  end {num} is not mapped (winding-pair topology beyond two \
                                  windings is not encoded in the document)"
-                            ));
+                                ),
+                            );
                         }
                     }
                 }
@@ -1613,18 +1666,18 @@ impl Mapper<'_> {
                         .get("TransformerTest.basePower")
                         .and_then(Value::as_f64)
                         .unwrap_or(0.0);
-                    if let Some(loss) = test.get("NoLoadTest.loss").and_then(Value::as_f64) {
-                        if base_power > 0.0 && loss.abs() > 0.0 {
-                            extras.insert("%noloadloss".into(), (loss / base_power * 100.0).into());
-                        }
+                    if let Some(loss) = test.get("NoLoadTest.loss").and_then(Value::as_f64)
+                        && base_power > 0.0
+                        && loss.abs() > 0.0
+                    {
+                        extras.insert("%noloadloss".into(), (loss / base_power * 100.0).into());
                     }
                     if let Some(current) = test
                         .get("NoLoadTest.excitingCurrent")
                         .and_then(Value::as_f64)
+                        && current.abs() > 0.0
                     {
-                        if current.abs() > 0.0 {
-                            extras.insert("%imag".into(), current.into());
-                        }
+                        extras.insert("%imag".into(), current.into());
                     }
                 }
                 break;
@@ -1633,7 +1686,7 @@ impl Mapper<'_> {
             self.apply_tap_changers(&name, &mut windings);
             let mut transformer = DistTransformer::new(name, windings, xsc_pct, phases.max(1));
             transformer.extras = extras;
-            self.net.transformers.push(transformer);
+            self.net.transformers_mut().push(transformer);
         }
     }
 
@@ -1641,7 +1694,7 @@ impl Mapper<'_> {
     /// exports (no end pointer); the regulated end is matched through
     /// `TapChanger.neutralU` against the winding rated voltages. The control
     /// settings themselves stay untyped.
-    fn apply_tap_changers(&mut self, tank: &str, windings: &mut [Winding]) {
+    fn apply_tap_changers(&mut self, tank: &str, windings: &mut [DistWinding]) {
         let Some(rtc) = self.doc.of_kind("RatioTapChanger").find(|o| o.name == tank) else {
             return;
         };
@@ -1664,17 +1717,20 @@ impl Mapper<'_> {
         if let Some(i) = target {
             windings[i].tap = ratio;
         }
-        self.warn(format!(
-            "transformer tank {tank}: RatioTapChanger sets the winding tap to {ratio}; the \
+        self.warn(
+            &C::READ_RAVENS_RETAINED_SOURCE_ONLY,
+            format!(
+                "transformer tank {tank}: RatioTapChanger sets the winding tap to {ratio}; the \
              regulator control settings are preserved untyped"
-        ));
+            ),
+        );
     }
 
     // ----- buses ------------------------------------------------------------
 
     fn finish_buses(&mut self) {
         self.claim(&["Location", "PositionPoint"]);
-        let mut locations: BTreeMap<String, crate::geo::Location> = BTreeMap::new();
+        let mut locations: BTreeMap<String, crate::geo::DistLocation> = BTreeMap::new();
         for obj in self.doc.of_kind("Location") {
             let Some(node) = obj.name.strip_suffix("_Location") else {
                 continue;
@@ -1695,7 +1751,10 @@ impl Mapper<'_> {
                 coord("PositionPoint.xPosition"),
                 coord("PositionPoint.yPosition"),
             ) {
-                locations.insert(node.to_owned(), crate::geo::Location { x, y, kind: None });
+                locations.insert(
+                    node.to_owned(),
+                    crate::geo::DistLocation { x, y, kind: None },
+                );
             }
         }
 
@@ -1706,9 +1765,7 @@ impl Mapper<'_> {
                 .map(|set| set.iter().map(u8::to_string).collect())
                 .unwrap_or_default();
             let mut bus = DistBus::new(obj.name.clone(), terminals);
-            if self.node_grounded.contains(&obj.name) {
-                bus.grounded = vec!["4".to_owned()];
-            }
+            bus.grounded = self.grounded_terminals(&obj.name);
             if let Some(set) = obj
                 .props
                 .get("ConnectivityNode.OperationalLimitSet")
@@ -1720,11 +1777,11 @@ impl Mapper<'_> {
             }
             bus.location = locations.remove(&obj.name);
             bus.extras = extras_with_mrid(obj);
-            self.net.buses.push(bus);
+            self.net.buses_mut().push(bus);
         }
 
         // Terminals seen on nodes the document never declared.
-        let declared: BTreeSet<&String> = self.net.buses.iter().map(|b| &b.id).collect();
+        let declared: BTreeSet<&String> = self.net.buses().iter().map(|b| &b.id).collect();
         let missing: Vec<String> = self
             .node_terminals
             .keys()
@@ -1732,34 +1789,78 @@ impl Mapper<'_> {
             .cloned()
             .collect();
         for node in missing {
-            self.warn(format!(
-                "terminal points at undeclared ConnectivityNode `{node}`; bus created"
-            ));
+            self.warn(
+                &C::READ_RAVENS_VALUE_DEFAULTED,
+                format!("terminal points at undeclared ConnectivityNode `{node}`; bus created"),
+            );
             let terminals: Vec<String> = self.node_terminals[&node]
                 .iter()
                 .map(u8::to_string)
                 .collect();
             let mut bus = DistBus::new(node.clone(), terminals);
-            if self.node_grounded.contains(&node) {
-                bus.grounded = vec!["4".to_owned()];
+            bus.grounded = self.grounded_terminals(&node);
+            self.net.buses_mut().push(bus);
+        }
+    }
+
+    /// The grounded terminals of a node. A document with `Ground` objects
+    /// states grounding explicitly and they are the whole answer; one
+    /// without (the upstream converters write none) grounds the neutral of
+    /// every node a grounded wye end, load, or bank implies.
+    fn grounded_terminals(&self, node: &str) -> Vec<String> {
+        if self.node_grounds.is_empty() {
+            return if self.node_grounded.contains(node) {
+                vec!["4".to_owned()]
+            } else {
+                Vec::new()
+            };
+        }
+        self.node_grounds.get(node).cloned().unwrap_or_default()
+    }
+
+    // ----- grounds -----------------------------------------------------------
+
+    /// A `Ground` grounds the conductors its terminal's phase code names at
+    /// its node; a code naming none grounds the neutral.
+    fn map_grounds(&mut self) {
+        self.claim(&["Ground"]);
+        for obj in self.doc.sorted_of_kind("Ground") {
+            let terminals = terminal_entries(&obj.props);
+            let Some(at) = terminals.first() else {
+                self.keep_untyped(obj, "no terminal");
+                continue;
+            };
+            let mut grounded = letters_to_terminals(&at.phases);
+            if grounded.is_empty() {
+                grounded.push("4".to_owned());
+                self.defaulted("ground", &obj.name, "phases");
             }
-            self.net.buses.push(bus);
+            self.use_terminals(&at.node, &grounded);
+            let entry = self.node_grounds.entry(at.node.clone()).or_default();
+            for t in grounded {
+                if !entry.contains(&t) {
+                    entry.push(t);
+                }
+            }
         }
     }
 
     // ----- untyped preservation ----------------------------------------------
 
     fn keep_untyped(&mut self, obj: &Obj, why: &str) {
-        self.warn(format!(
-            "{} {}: {why}; preserved untyped (round-trips to MG-RAVENS, dropped elsewhere)",
-            obj.kind, obj.name
-        ));
+        self.warn(
+            &C::READ_RAVENS_RETAINED_SOURCE_ONLY,
+            format!(
+                "{} {}: {why}; preserved untyped (round-trips to MG-RAVENS, dropped elsewhere)",
+                obj.kind, obj.name
+            ),
+        );
         self.push_untyped(obj);
     }
 
     fn push_untyped(&mut self, obj: &Obj) {
         let raw = serde_json::to_string(&Value::Object(obj.props.clone())).unwrap_or_default();
-        self.net.untyped.push(UntypedObject::new(
+        self.net.untyped_objects_mut().push(UntypedObject::new(
             obj.kind.clone(),
             obj.name.clone(),
             vec![
@@ -1787,10 +1888,13 @@ impl Mapper<'_> {
             self.push_untyped(obj);
         }
         for (kind, count) in by_kind {
-            self.warn(format!(
-                "{count} {kind} object(s) have no typed model; preserved untyped \
+            self.warn(
+                &C::READ_RAVENS_CLASS_UNMAPPED,
+                format!(
+                    "{count} {kind} object(s) have no typed model; preserved untyped \
                  (round-trips to MG-RAVENS, dropped elsewhere)"
-            ));
+                ),
+            );
         }
     }
 }

@@ -6016,6 +6016,7 @@ mod tests {
             SourceFormat::PypsaCsv,
             SourceFormat::Goc3Json,
             SourceFormat::SurgeJson,
+            SourceFormat::RavensJson,
             SourceFormat::DeepMindOpfDataJson,
             SourceFormat::Xiidm,
             SourceFormat::Jiidm,
@@ -6040,6 +6041,7 @@ mod tests {
                 | SourceFormat::PypsaCsv
                 | SourceFormat::Goc3Json
                 | SourceFormat::SurgeJson
+                | SourceFormat::RavensJson
                 | SourceFormat::DeepMindOpfDataJson
                 | SourceFormat::Xiidm
                 | SourceFormat::Jiidm

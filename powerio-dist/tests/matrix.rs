@@ -874,6 +874,7 @@ fn canonical_writers_preserve_electrical_equivalents() {
                 Fmt::Dss => helpers::emit_dss(&net),
                 Fmt::Bmopf => helpers::emit_bmopf_json(&net),
                 Fmt::Pmd => helpers::emit_pmd_json(&net),
+                Fmt::Ravens => helpers::emit_value(&net, DistTargetFormat::RavensJson),
             };
             let reparsed = match target.parse_emission(&first) {
                 Ok(n) => n,
@@ -883,6 +884,7 @@ fn canonical_writers_preserve_electrical_equivalents() {
                 Fmt::Dss => helpers::emit_dss(&reparsed),
                 Fmt::Bmopf => helpers::emit_bmopf_json(&reparsed),
                 Fmt::Pmd => helpers::emit_pmd_json(&reparsed),
+                Fmt::Ravens => helpers::emit_value(&reparsed, DistTargetFormat::RavensJson),
             };
             if target == Fmt::Dss {
                 let third = target.parse_emission(&second).unwrap();
@@ -914,7 +916,7 @@ fn ravens_writer_idempotent_across_fixtures() {
         // CIM SinglePhaseKind names only four conductor identities (A/B/C/N),
         // so a linecode with more conductors has no phase representation for
         // the extra conductors and cannot round-trip. Skip loudly rather than
-        // silently: the writer warns on the same condition.
+        // silently: the writer drops such a segment with a finding.
         if let Some(code) = net.line_codes().iter().find(|c| c.n_conductors > 4) {
             eprintln!(
                 "skipping {} -> RAVENS idempotence: linecode {} has {} conductors (> 4 CIM \
@@ -932,13 +934,25 @@ fn ravens_writer_idempotent_across_fixtures() {
             )
         });
         let second = helpers::emit_value(&reparsed, Fmt::Ravens.target());
-        assert_eq!(
-            first.text,
-            second.text,
-            "{} -> {}: canonical output is not idempotent",
-            case.label,
-            Fmt::Ravens.name()
-        );
+        if first.text != second.text {
+            let (a, b): (Vec<&str>, Vec<&str>) =
+                (first.text.lines().collect(), second.text.lines().collect());
+            let at = a
+                .iter()
+                .zip(&b)
+                .position(|(x, y)| x != y)
+                .unwrap_or(a.len().min(b.len()));
+            let window =
+                |lines: &[&str]| lines[at.saturating_sub(3)..(at + 4).min(lines.len())].join("\n");
+            panic!(
+                "{} -> {}: canonical output is not idempotent at line {}:\n--- first\n{}\n--- second\n{}",
+                case.label,
+                Fmt::Ravens.name(),
+                at + 1,
+                window(&a),
+                window(&b)
+            );
+        }
     }
 }
 
@@ -1165,7 +1179,7 @@ fn renumbering_legs_are_position_stable_bijections() {
             let conv = match target {
                 Fmt::Dss => helpers::emit_dss(&net),
                 Fmt::Pmd => helpers::emit_pmd_json(&net),
-                Fmt::Bmopf => unreachable!("BMOPF keeps terminal names"),
+                Fmt::Bmopf | Fmt::Ravens => unreachable!("not a renumbering leg"),
             };
             let round_tripped = target
                 .parse_emission(&conv)

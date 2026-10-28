@@ -39,6 +39,8 @@ pub enum DistSourceFormat {
     Sincal,
     /// MG-RAVENS JSON, the multiconductor (distribution) profile.
     RavensJson,
+    /// PowerModelsDistribution MATHEMATICAL model JSON.
+    PmdMathJson,
 }
 
 impl DistSourceFormat {
@@ -52,6 +54,7 @@ impl DistSourceFormat {
             DistSourceFormat::BmopfJson => "bmopf-json",
             DistSourceFormat::CimDist => "cim-dist",
             DistSourceFormat::RavensJson => "ravens-json",
+            DistSourceFormat::PmdMathJson => "pmd-math-json",
         }
     }
 }

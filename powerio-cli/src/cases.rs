@@ -157,6 +157,22 @@ pub fn classified_json(input: &Path) -> anyhow::Result<Option<ClassifiedCase>> {
     let text = std::fs::read_to_string(input)
         .with_context(|| format!("reading JSON format markers from {}", input.display()))?;
     let format = classify_case_json(&text, input)?;
+    // Both MG-RAVENS profiles share one top level shape. The header
+    // classifier reads the balanced profile unless a multiconductor table
+    // sits at the top level; a per-phase class nested deeper still marks the
+    // multiconductor profile.
+    let format = match format {
+        DetectedFormat::Transmission(
+            powerio_tx::format::routing::TransmissionFormat::RavensJson,
+        ) if powerio_core::cim::ravens::detect_profile(&text)
+            == powerio_core::cim::ravens::Profile::Multiconductor =>
+        {
+            DetectedFormat::Distribution(
+                powerio_tx::format::routing::DistributionFormat::RavensJson,
+            )
+        }
+        other => other,
+    };
     if !matches!(
         format,
         DetectedFormat::Transmission(_) | DetectedFormat::Distribution(_)
