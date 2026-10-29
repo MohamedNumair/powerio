@@ -155,15 +155,30 @@ entry, an absolute path into the local Julia depot, with the package relative
 
 ## ravens/
 
-MG-RAVENS multiconductor JSON example from the schema project, vendored
-unchanged as the reader/writer round-trip fixture.
+MG-RAVENS multiconductor JSON examples from the schema project, vendored
+unchanged: the reader/writer round-trip fixture and the upstream
+converter's IEEE 13 output.
 
 - Source: <https://github.com/lanl-ansi/MG-RAVENS>, commit
-  `094ad1163cb111df676884635aa03faa0538b688`, file
-  `examples/case3_balanced.json` (a three-bus, two-line,
-  three-single-phase-load feeder with a Thevenin `EnergySource`).
-- `case3_balanced.json` sha256
-  `4a66f801aa2506562b8611215314d36d000055d4ac9a1bec7ee84693e0b9e6e7`
+  `094ad1163cb111df676884635aa03faa0538b688`.
+- `case3_balanced.json`, from `examples/case3_balanced.json`: a three-bus,
+  two-line, three-single-phase-load feeder with a Thevenin `EnergySource`.
+  sha256 `4a66f801aa2506562b8611215314d36d000055d4ac9a1bec7ee84693e0b9e6e7`.
+- `IEEE13_Assets.json`, from `examples/IEEE13_Assets.json` (last changed
+  upstream in `35b72bea3eef2fec94280bd4d0dc24466121cea3`): the IEEE 13 node
+  feeder as `opendss2xml` writes it, with transformer terminals on the
+  `PowerTransformer`, `RatioTapChanger` regulators, and line impedances
+  stated by wire and cable assets (`WireSpacingInfo`, `OverheadWireInfo`,
+  `ConcentricNeutralCableInfo`, `TapeShieldCableInfo`). 3,358 lines,
+  160,797 bytes, sha256
+  `e1628b89d5da25e3785257639693475820fe3665f08448376835698329d5b138`.
+  `powerio-dist/tests/ravens_ieee13.rs` compares it with
+  `opendss/ieee13/IEEE13Nodeckt.dss`.
+
+| File | Lines | Bytes |
+|---|---:|---:|
+| `case3_balanced.json` | 616 | 26,742 |
+| `IEEE13_Assets.json` | 3,358 | 160,797 |
 
 ## Licensing
 
