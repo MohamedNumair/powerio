@@ -61,8 +61,9 @@ fn case3_balanced_maps_exactly() {
     assert!(close(lc.x_series[0][0], 0.0583));
     assert!(close(lc.b_from[0][0], 1.6e-5 / 2.0));
     assert!(close(lc.b_to[0][0], 1.6e-5 / 2.0));
-    // The emergency current limit becomes the linecode ampacity.
-    assert_eq!(lc.i_max, Some(vec![600.0, 600.0, 600.0]));
+    // MG-RAVENS rates the segment, not the impedance: the linecode carries
+    // no ampacity, so an unrated segment on the same code stays unrated.
+    assert_eq!(lc.i_max, None);
 
     // Two three-phase lines; impedance stays in ohm/m, length in meters.
     assert_eq!(net.lines().len(), 3);
@@ -72,6 +73,8 @@ fn case3_balanced_maps_exactly() {
     assert_eq!(ohline.terminal_map_from, ["1", "2", "3"]);
     assert!(close(ohline.length, 1.0));
     assert_eq!(ohline.linecode, "556mcm");
+    // The emergency current limit becomes the segment's ampacity.
+    assert_eq!(ohline.i_max, Some(vec![600.0, 600.0, 600.0]));
     // The continuous limit rides in extras as the dss `normamps`.
     assert!(close(
         ohline

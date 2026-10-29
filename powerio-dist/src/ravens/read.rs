@@ -829,26 +829,10 @@ impl Mapper<'_> {
                     extras.insert("normamps".into(), norm.into());
                 }
                 if let Some(emerg) = limits.emerg_amps {
-                    let n = map.len();
-                    let mut conflicts = false;
-                    if let Some(code) = self
-                        .net
-                        .line_codes_mut()
-                        .iter_mut()
-                        .find(|c| c.name == code_name)
-                    {
-                        let proposed = vec![emerg; n.max(code.n_conductors)];
-                        match &code.i_max {
-                            Some(existing) if *existing != proposed => conflicts = true,
-                            Some(_) => {}
-                            None => code.i_max = Some(proposed),
-                        }
-                    }
-                    if conflicts {
-                        // Limits belong to the segment. Keep the first
-                        // shared default, with differing values on the line.
-                        i_max = Some(vec![emerg; n]);
-                    }
+                    // Limits belong to the segment. A shared linecode default
+                    // would hand this limit to every unrated segment on the
+                    // same code, so it stays on the line.
+                    i_max = Some(vec![emerg; map.len()]);
                 }
             }
 

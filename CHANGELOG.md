@@ -5,6 +5,11 @@
 - PMD MATHEMATICAL emission retains purely resistive or reactive source
   impedance. MG-RAVENS emission respects line ampacity overrides, including
   distinct limits on segments sharing a linecode.
+- MG-RAVENS reading keeps a segment's ampacity on the segment, so an unrated
+  segment sharing its linecode stays unrated. PMD MATHEMATICAL emission takes
+  the grounding flags of a source's virtual bus from the parent bus terminals
+  the source connects to, so a phase restricted source writes consistent
+  `terminals` and `grounded` arrays.
 - MG-RAVENS JSON (`ravens-json`) parses and writes
   ([#27](https://github.com/eigenergy/powerio/issues/27)). MG-RAVENS is
   LANL's CIM derived microgrid interchange schema

@@ -102,6 +102,14 @@ fn ravens_line_rating_precedence_and_fallback() {
         let mut net =
             helpers::parse_file(case("ravens/case3_balanced.json"), Some("ravens-json")).unwrap();
         let expected = override_amps.unwrap_or(600.0);
+        // A RAVENS read rates the segment, so the fallback case states the
+        // linecode default itself.
+        let code_name = net.lines()[0].linecode.clone();
+        net.line_codes_mut()
+            .iter_mut()
+            .find(|code| code.name == code_name)
+            .unwrap()
+            .i_max = Some(vec![600.0; 3]);
         net.lines_mut()[0].i_max = override_amps.map(|amps| vec![amps; 3]);
         let name = net.lines()[0].name.clone();
         let out = net.emit_value(DistTargetFormat::RavensJson);

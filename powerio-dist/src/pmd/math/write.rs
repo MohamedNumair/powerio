@@ -1669,14 +1669,29 @@ impl Writer {
             if nonzero(&rs) || nonzero(&xs) {
                 // The Thevenin source: an ideal bus behind the impedance.
                 let bus_index = self.buses.len() + 1;
-                let grounded: Vec<bool> = self.buses[gen_bus - 1]
-                    .fields
-                    .get("grounded")
-                    .and_then(Value::as_array)
-                    .map_or_else(
-                        || vec![false; nconductors],
-                        |a| a.iter().map(|v| v.as_bool().unwrap_or(false)).collect(),
-                    );
+                // The parent bus's flags align with its own terminals; the
+                // virtual bus has only the source's connections, in their
+                // order, so each flag is looked up by terminal.
+                let parent = &self.buses[gen_bus - 1].fields;
+                let flags = |key: &str| -> Vec<Value> {
+                    parent
+                        .get(key)
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default()
+                };
+                let (parent_terminals, parent_grounded) = (flags("terminals"), flags("grounded"));
+                let grounded: Vec<bool> = connections
+                    .iter()
+                    .map(|c| {
+                        parent_terminals
+                            .iter()
+                            .position(|t| t.as_i64() == Some(*c))
+                            .and_then(|k| parent_grounded.get(k))
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false)
+                    })
+                    .collect();
                 let mut vm_bus = vm.clone();
                 let mut vmin = vm.clone();
                 let mut vmax = vm.clone();
