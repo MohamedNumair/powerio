@@ -10,6 +10,16 @@
   the grounding flags of a source's virtual bus from the parent bus terminals
   the source connects to, so a phase restricted source writes consistent
   `terminals` and `grounded` arrays.
+- MG-RAVENS and distribution CIM keep each element's `IdentifiedObject.mRID`
+  when a feeder converts between them (transformers excepted: RAVENS keys
+  them by the enclosing PowerTransformer, CIM by the tank). The multiconductor
+  RAVENS reader counts an open delta tank's phase to phase end as one phase,
+  reads transformer terminals stated once on the `PowerTransformer` and the
+  `TransformerEnd.RatioTapChanger` end pointer (the layout of the upstream
+  IEEE 13 example), and both RAVENS directions state
+  `ShortCircuitTest.leakageImpedance` as `opendss2xml` writes it and
+  PowerModelsDistribution's RAVENS reader inverts it: the pair's percent
+  impedance magnitude, resistance included, times the end's base ohms.
 - MG-RAVENS JSON (`ravens-json`) parses and writes
   ([#27](https://github.com/eigenergy/powerio/issues/27)). MG-RAVENS is
   LANL's CIM derived microgrid interchange schema

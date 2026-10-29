@@ -1812,6 +1812,29 @@ impl Mapper<'_> {
                 continue;
             }
 
+            // Upstream documents also state the terminals once, on the
+            // enclosing `PowerTransformer` (the IEEE 13 example's regulator
+            // bank and `xfm1`): an end without its own terminal takes the
+            // parent's terminal with its end number as sequence number.
+            let parent_terminals: Vec<&Map<String, Value>> = self
+                .doc
+                .of_kind("PowerTransformer")
+                .find(|p| {
+                    p.name == tank.name
+                        || p.props
+                            .get("PowerTransformer.TransformerTank")
+                            .and_then(Value::as_array)
+                            .is_some_and(|tanks| {
+                                tanks.iter().any(|t| {
+                                    t.get("IdentifiedObject.name").and_then(Value::as_str)
+                                        == Some(tank.name.as_str())
+                                })
+                            })
+                })
+                .and_then(|p| p.props.get("ConductingEquipment.Terminals"))
+                .and_then(Value::as_array)
+                .map(|items| items.iter().filter_map(Value::as_object).collect())
+                .unwrap_or_default();
             let mut windings = Vec::new();
             let mut phases = 1usize;
             let mut ok = true;
@@ -1822,6 +1845,12 @@ impl Mapper<'_> {
                     .and_then(Value::as_array)
                     .and_then(|items| items.first())
                     .and_then(Value::as_object)
+                    .or_else(|| {
+                        parent_terminals.iter().copied().find(|t| {
+                            t.get("ACDCTerminal.sequenceNumber").and_then(Value::as_u64)
+                                == Some(*num)
+                        })
+                    })
                     .and_then(|t| t.get("Terminal.ConnectivityNode"))
                     .and_then(pointer_name)
                     .map(str::to_owned);
@@ -1892,7 +1921,14 @@ impl Mapper<'_> {
                     map.push("4".to_owned());
                 }
                 let hot = map.iter().filter(|t| *t != "4").count();
-                phases = phases.max(hot);
+                // A delta end on two conductors is one phase to phase
+                // winding (an open delta tank's `AB`), not two phases.
+                let end_phases = if conn == DistWindingConn::Delta && hot == 2 {
+                    1
+                } else {
+                    hot
+                };
+                phases = phases.max(end_phases);
 
                 let v_ref = iget("TransformerEndInfo.ratedU").unwrap_or(0.0);
                 let s_rating = iget("TransformerEndInfo.ratedS").unwrap_or(0.0);
@@ -1970,7 +2006,35 @@ impl Mapper<'_> {
                         crate::model::n_winding_impedance_base(1, rated_u, base_power)
                     {
                         if !found_sc {
-                            xsc_pct[0] = z / z_base * 100.0;
+                            // The MG-RAVENS tools' leakage impedance: percent
+                            // magnitude times base ohms, the pair resistance
+                            // included (see the writer).
+                            let r_pair = super::write::pair_resistance_pct(&windings);
+                            let z_pct = z / z_base;
+                            if z_pct < r_pair {
+                                self.warn(
+                                    &C::READ_RAVENS_DIST_VALUE_SUBSTITUTED,
+                                    format!(
+                                        "transformer tank {name}: leakage impedance {z} is \
+                                         {z_pct}% of the base, below the windings' {r_pair}% \
+                                         resistance; the reactance is 0 (a document stating \
+                                         plain CIM ohms reads this way)"
+                                    ),
+                                );
+                            }
+                            let x_pct = super::write::leakage_reactance_pct(z_pct, r_pair);
+                            // The test's base power, restated on winding 1's.
+                            let s_1 = windings.first().map_or(0.0, |w| w.s_rating);
+                            // Bit exact: an equal base must not pick up the
+                            // one ULP a multiply then divide can add.
+                            xsc_pct[0] = if s_1 > 0.0
+                                && base_power > 0.0
+                                && s_1.to_bits() != base_power.to_bits()
+                            {
+                                x_pct * s_1 / base_power
+                            } else {
+                                x_pct
+                            };
                             found_sc = true;
                         } else if windings.len() > 2 {
                             self.warn(
@@ -2032,19 +2096,40 @@ impl Mapper<'_> {
                 break;
             }
 
-            self.apply_tap_changers(&name, &mut windings);
+            // The end that points at its tap changer is the regulated one
+            // (`opendss2xml` writes the pointer on the tap winding).
+            let pointed = ends.iter().enumerate().find_map(|(k, (_, end))| {
+                end.get("TransformerEnd.RatioTapChanger")
+                    .and_then(pointer_name)
+                    .map(|rtc| (k, rtc.to_owned()))
+            });
+            self.apply_tap_changers(&name, pointed, &mut windings);
             let mut transformer = DistTransformer::new(name, windings, xsc_pct, phases.max(1));
             transformer.extras = extras;
             self.net.transformers_mut().push(transformer);
         }
     }
 
-    /// `RatioTapChanger` records link to their tank by name in the upstream
-    /// exports (no end pointer); the regulated end is matched through
+    /// A `TransformerEnd.RatioTapChanger` pointer names the tap changer and
+    /// its regulated end. Without one, the record links to its tank by name
+    /// (the older upstream exports) and the regulated end is matched through
     /// `TapChanger.neutralU` against the winding rated voltages. The control
     /// settings themselves stay untyped.
-    fn apply_tap_changers(&mut self, tank: &str, windings: &mut [DistWinding]) {
-        let Some(rtc) = self.doc.of_kind("RatioTapChanger").find(|o| o.name == tank) else {
+    fn apply_tap_changers(
+        &mut self,
+        tank: &str,
+        pointed: Option<(usize, String)>,
+        windings: &mut [DistWinding],
+    ) {
+        let (rtc_name, pointed_end) = match pointed {
+            Some((end, rtc)) => (rtc, Some(end)),
+            None => (tank.to_owned(), None),
+        };
+        let Some(rtc) = self
+            .doc
+            .of_kind("RatioTapChanger")
+            .find(|o| o.name == rtc_name)
+        else {
             return;
         };
         let step = f_or(rtc, "TapChanger.step", 1.0);
@@ -2059,10 +2144,14 @@ impl Mapper<'_> {
             1.0 + (step - neutral_step) * increment / 100.0
         };
         let neutral_u = f_or(rtc, "TapChanger.neutralU", 0.0);
-        let target = windings
-            .iter()
-            .position(|w| neutral_u > 0.0 && (w.v_ref - neutral_u).abs() <= 1e-6 * neutral_u.abs())
-            .or_else(|| windings.len().checked_sub(1));
+        let target = pointed_end.filter(|&end| end < windings.len()).or_else(|| {
+            windings
+                .iter()
+                .position(|w| {
+                    neutral_u > 0.0 && (w.v_ref - neutral_u).abs() <= 1e-6 * neutral_u.abs()
+                })
+                .or_else(|| windings.len().checked_sub(1))
+        });
         if let Some(i) = target {
             windings[i].tap = ratio;
         }

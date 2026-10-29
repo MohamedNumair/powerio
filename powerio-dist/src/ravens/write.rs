@@ -21,7 +21,7 @@ use crate::model::{
     IbrPrimeMover, MulticonductorNetwork,
 };
 
-use super::{MRID_KEY, NORMAL_OPEN_KEY, det_mrid, terminal_phase};
+use super::{CIM_MRID_KEY, MRID_KEY, NORMAL_OPEN_KEY, det_mrid, terminal_phase};
 
 /// Schema release the writer targets; the upstream repository tags none, so
 /// this mirrors the `RavensVersion` its own examples embed.
@@ -82,6 +82,57 @@ fn stable_fixed(initial: f64, cycle: impl Fn(f64) -> f64) -> f64 {
     y
 }
 
+/// A winding's `TransformerEndInfo.r` (ohms) from its percent resistance,
+/// at the fixed point of read then rewrite.
+fn written_r_ohm(r_pct: f64, z_base: f64) -> f64 {
+    stable_fixed(r_pct / 100.0 * z_base, |v| {
+        (v / z_base * 100.0) / 100.0 * z_base
+    })
+}
+
+/// The (1, 2) pair's series resistance in percent on winding 1's rating,
+/// the resistance the MG-RAVENS leakage impedance magnitude includes.
+pub(crate) fn pair_resistance_pct(windings: &[crate::model::DistWinding]) -> f64 {
+    let Some(w1) = windings.first() else {
+        return 0.0;
+    };
+    let on_w1 = |w: &crate::model::DistWinding| {
+        if w.s_rating > 0.0 {
+            w.r_pct * w1.s_rating / w.s_rating
+        } else {
+            w.r_pct
+        }
+    };
+    windings.iter().take(2).map(on_w1).sum()
+}
+
+/// The reactance a leakage impedance magnitude `z_pct` (percent) leaves
+/// beside the pair resistance `r_pct`; zero when the magnitude is smaller.
+pub(crate) fn leakage_reactance_pct(z_pct: f64, r_pct: f64) -> f64 {
+    (z_pct * z_pct - r_pct * r_pct).max(0.0).sqrt()
+}
+
+/// [`stable_fixed`], then, when it has not settled, the nearest value within
+/// a few ULPs that `cycle` maps to itself.
+#[allow(clippy::float_cmp)] // the fixed-point check is bit exact by design
+fn stable_fixed_near(initial: f64, cycle: impl Fn(f64) -> f64) -> f64 {
+    let y = stable_fixed(initial, &cycle);
+    if cycle(y) == y || !y.is_finite() {
+        return y;
+    }
+    let (mut up, mut down) = (y, y);
+    for _ in 0..16 {
+        up = up.next_up();
+        down = down.next_down();
+        for candidate in [down, up] {
+            if cycle(candidate) == candidate {
+                return candidate;
+            }
+        }
+    }
+    y
+}
+
 fn pointer(class: &str, name: &str) -> Value {
     Value::String(format!("{class}::'{name}'"))
 }
@@ -121,6 +172,16 @@ fn identified(kind: &str, name: &str, imported: Option<&str>) -> Map<String, Val
 
 fn extras_mrid(extras: &Extras) -> Option<&str> {
     extras.get(MRID_KEY).and_then(Value::as_str)
+}
+
+/// The imported mRID of an element other than a transformer: its own
+/// RAVENS id, else the id a distribution CIM document gave it. Both formats
+/// state `IdentifiedObject.mRID` on the same CIM classes, so a feeder moving
+/// between them keeps its identifiers. A transformer is excluded: RAVENS
+/// keys it by the enclosing `PowerTransformer`, which several CIM tanks can
+/// share, while the CIM extra names the tank.
+fn imported_mrid(extras: &Extras) -> Option<&str> {
+    extras_mrid(extras).or_else(|| extras.get(CIM_MRID_KEY).and_then(Value::as_str))
 }
 
 /// An extras value as a number, whether the reader stored it as one or a
@@ -578,7 +639,7 @@ impl Writer {
             let mut obj = identified(
                 "PerLengthPhaseImpedance",
                 &code.name,
-                extras_mrid(&code.extras),
+                imported_mrid(&code.extras),
             );
             obj.insert(
                 "PerLengthPhaseImpedance.conductorCount".into(),
@@ -625,7 +686,11 @@ impl Writer {
                 "PerLengthPhaseImpedance.PhaseImpedanceData".into(),
                 Value::Array(rows),
             );
-            self.warn_extras(&format!("linecode {}", code.name), &code.extras, &[]);
+            self.warn_extras(
+                &format!("linecode {}", code.name),
+                &code.extras,
+                &[CIM_MRID_KEY],
+            );
             if code.s_max.is_some() {
                 self.warn(
                     &C::EMIT_RAVENS_DIST_FIELD_DROPPED,
@@ -657,7 +722,7 @@ impl Writer {
                 ));
                 continue;
             }
-            let mut obj = identified("ACLineSegment", &line.name, extras_mrid(&line.extras));
+            let mut obj = identified("ACLineSegment", &line.name, imported_mrid(&line.extras));
             obj.insert("Equipment.inService".into(), Value::Bool(true));
             if let Some((key, value)) = self.base_pointer(&line.bus_from) {
                 obj.insert(key, value);
@@ -761,7 +826,7 @@ impl Writer {
                 "ACLineSegment.ACLineSegmentPhase".into(),
                 Value::Array(phases),
             );
-            self.warn_extras(&what, &line.extras, &["normamps"]);
+            self.warn_extras(&what, &line.extras, &["normamps", CIM_MRID_KEY]);
             table.insert(line.name.clone(), Value::Object(obj));
         }
         table
@@ -779,7 +844,7 @@ impl Writer {
             {
                 continue;
             }
-            let mut obj = identified("Switch", &s.name, extras_mrid(&s.extras));
+            let mut obj = identified("Switch", &s.name, imported_mrid(&s.extras));
             obj.insert("Equipment.inService".into(), Value::Bool(true));
             obj.insert("Switch.open".into(), Value::Bool(s.open));
             let normal = s
@@ -842,7 +907,7 @@ impl Writer {
                     .collect();
                 obj.insert("Switch.SwitchPhase".into(), Value::Array(sides));
             }
-            self.warn_extras(&what, &s.extras, &["normamps"]);
+            self.warn_extras(&what, &s.extras, &["normamps", CIM_MRID_KEY]);
             table.insert(s.name.clone(), Value::Object(obj));
         }
         table
@@ -856,7 +921,7 @@ impl Writer {
             if !self.representable_map(&what, &load.terminal_map) {
                 continue;
             }
-            let mut obj = identified("EnergyConsumer", &load.name, extras_mrid(&load.extras));
+            let mut obj = identified("EnergyConsumer", &load.name, imported_mrid(&load.extras));
             let p: f64 = load.p_nom.iter().sum();
             let q: f64 = load.q_nom.iter().sum();
             let p = self.num(p, &what);
@@ -1030,8 +1095,17 @@ impl Writer {
                 &what,
                 &load.extras,
                 &[
-                    "kv", "phases", "daily", "yearly", "spectrum", "pf", "model", "zipv", "vminpu",
+                    "kv",
+                    "phases",
+                    "daily",
+                    "yearly",
+                    "spectrum",
+                    "pf",
+                    "model",
+                    "zipv",
+                    "vminpu",
                     "vmaxpu",
+                    CIM_MRID_KEY,
                 ],
             );
             table.insert(load.name.clone(), Value::Object(obj));
@@ -1231,7 +1305,7 @@ impl Writer {
             let mut obj = identified(
                 "LinearShuntCompensator",
                 &shunt.name,
-                extras_mrid(&shunt.extras),
+                imported_mrid(&shunt.extras),
             );
             let n = shunt.terminal_map.len().max(1);
             let diag = |m: &ConductorMatrix, k: usize| {
@@ -1332,7 +1406,11 @@ impl Writer {
                 "ConductingEquipment.Terminals".into(),
                 Value::Array(terminals),
             );
-            self.warn_extras(&what, &shunt.extras, &["kv", "phases", "kvar", "conn"]);
+            self.warn_extras(
+                &what,
+                &shunt.extras,
+                &["kv", "phases", "kvar", "conn", CIM_MRID_KEY],
+            );
             table.insert(shunt.name.clone(), Value::Object(obj));
         }
         table
@@ -1370,7 +1448,7 @@ impl Writer {
             let mut obj = identified(
                 "SynchronousMachine",
                 &machine.name,
-                extras_mrid(&machine.extras),
+                imported_mrid(&machine.extras),
             );
             // CIM load convention (the upstream opendss2xml converter emits
             // `-gen.kW`): a machine's active/reactive power is injection
@@ -1443,7 +1521,11 @@ impl Writer {
                     ),
                 );
             }
-            self.warn_extras(&what, &machine.extras, &["kv", "kva", "phases"]);
+            self.warn_extras(
+                &what,
+                &machine.extras,
+                &["kv", "kva", "phases", CIM_MRID_KEY],
+            );
             table.insert(machine.name.clone(), Value::Object(obj));
         }
         table
@@ -1478,7 +1560,7 @@ impl Writer {
             let mut obj = identified(
                 "PowerElectronicsConnection",
                 &ibr.name,
-                extras_mrid(&ibr.extras),
+                imported_mrid(&ibr.extras),
             );
             let rated_s: f64 = ibr.s_max.iter().sum();
             // Injection-negative CIM load convention, consistent with the
@@ -1599,7 +1681,11 @@ impl Writer {
                     format!("{what}: voltage aggregation setting has no MG-RAVENS slot; dropped"),
                 );
             }
-            self.warn_extras(&what, &ibr.extras, &["kv", "kvar", "phases", "kva"]);
+            self.warn_extras(
+                &what,
+                &ibr.extras,
+                &["kv", "kvar", "phases", "kva", CIM_MRID_KEY],
+            );
             table.insert(ibr.name.clone(), Value::Object(obj));
         }
         table
@@ -1637,7 +1723,7 @@ impl Writer {
             if !self.representable_map(&what, &source.terminal_map) {
                 continue;
             }
-            let mut obj = identified("EnergySource", &source.name, extras_mrid(&source.extras));
+            let mut obj = identified("EnergySource", &source.name, imported_mrid(&source.extras));
             let hot: Vec<usize> = source
                 .terminal_map
                 .iter()
@@ -1801,7 +1887,17 @@ impl Writer {
             self.warn_extras(
                 &what,
                 &source.extras,
-                &["basekv", "pu", "angle", "r1", "x1", "r0", "x0", "phases"],
+                &[
+                    "basekv",
+                    "pu",
+                    "angle",
+                    "r1",
+                    "x1",
+                    "r0",
+                    "x0",
+                    "phases",
+                    CIM_MRID_KEY,
+                ],
             );
             table.insert(source.name.clone(), Value::Object(obj));
         }
@@ -1920,10 +2016,7 @@ impl Writer {
                 info.insert("TransformerEndInfo.ratedS".into(), rated_s);
                 if let Some(z_base) = crate::model::n_winding_impedance_base(1, w.v_ref, w.s_rating)
                 {
-                    let r = stable_fixed(w.r_pct / 100.0 * z_base, |v| {
-                        (v / z_base * 100.0) / 100.0 * z_base
-                    });
-                    let r = self.num(r, &what);
+                    let r = self.num(written_r_ohm(w.r_pct, z_base), &what);
                     info.insert("TransformerEndInfo.r".into(), r);
                 }
                 if (w.tap - 1.0).abs() > 0.0 {
@@ -1949,11 +2042,37 @@ impl Writer {
 
             // Tests ride on winding 1: the pair (1,2) short-circuit
             // reactance, and the no-load record when the extras carry one.
+            // The leakage impedance follows the MG-RAVENS tools, not plain
+            // CIM ohms: `opendss2xml` writes the pair's percent impedance
+            // magnitude, sqrt((%r1 + %r2)^2 + %x^2), times the end's base
+            // ohms, and PowerModelsDistribution's RAVENS reader inverts
+            // exactly that. Ohms here would read back as an impedance below
+            // the winding resistance.
             let w1 = &xf.windings[0];
             if let Some(z_base) = crate::model::n_winding_impedance_base(1, w1.v_ref, w1.s_rating) {
                 let xhl = xf.xsc_pct.first().copied().unwrap_or(0.0);
-                let z = stable_fixed(xhl / 100.0 * z_base, |v| {
-                    (v / z_base * 100.0) / 100.0 * z_base
+                // The pair resistance as the reader recovers it from the
+                // written `TransformerEndInfo.r`, so the cycle below is the
+                // read exactly and write, read, write stays byte stable.
+                let read_back: Vec<_> = xf
+                    .windings
+                    .iter()
+                    .map(|w| {
+                        let mut w = w.clone();
+                        if let Some(z_base) =
+                            crate::model::n_winding_impedance_base(1, w.v_ref, w.s_rating)
+                        {
+                            w.r_pct = written_r_ohm(w.r_pct, z_base) / z_base * 100.0;
+                        }
+                        w
+                    })
+                    .collect();
+                let r_pair = pair_resistance_pct(&read_back);
+                // The square root in the read can leave a one ULP two cycle
+                // that plain iteration does not settle; search the
+                // neighbourhood for a true fixed point.
+                let z = stable_fixed_near(xhl.hypot(r_pair) * z_base, |v| {
+                    leakage_reactance_pct(v / z_base, r_pair).hypot(r_pair) * z_base
                 });
                 let mut test = identified(
                     "ShortCircuitTest",
@@ -2051,7 +2170,7 @@ impl Writer {
         let mut locations = Map::new();
         let mut grounds = Map::new();
         for bus in net.buses() {
-            let mut obj = identified("ConnectivityNode", &bus.id, extras_mrid(&bus.extras));
+            let mut obj = identified("ConnectivityNode", &bus.id, imported_mrid(&bus.extras));
             if bus.v_min.is_some() || bus.v_max.is_some() {
                 let normal = self.base_of(&bus.id);
                 let set = self.voltage_limit_set(bus.v_min, bus.v_max, normal);
@@ -2149,7 +2268,7 @@ impl Writer {
                 );
                 locations.insert(name, Value::Object(loc));
             }
-            self.warn_extras(&format!("bus {}", bus.id), &bus.extras, &[]);
+            self.warn_extras(&format!("bus {}", bus.id), &bus.extras, &[CIM_MRID_KEY]);
             nodes.insert(bus.id.clone(), Value::Object(obj));
         }
         (nodes, locations, grounds)

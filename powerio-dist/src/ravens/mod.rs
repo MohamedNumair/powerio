@@ -47,6 +47,11 @@ pub(crate) use write::emit_ravens_json_text;
 /// `pmd_*` so the other writers treat it as converter bookkeeping, not data.
 pub(crate) const MRID_KEY: &str = "ravens_mrid";
 
+/// The distribution CIM reader's extras key for the same
+/// `IdentifiedObject.mRID`; the writer reuses it for every element but a
+/// transformer, and the CIM writer reads [`MRID_KEY`] back the same way.
+pub(crate) const CIM_MRID_KEY: &str = "cim_mrid";
+
 /// Extras key carrying `Switch.normalOpen` when it differs from the live
 /// state (the typed model only has `open`).
 pub(crate) const NORMAL_OPEN_KEY: &str = "ravens_normal_open";
