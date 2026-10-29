@@ -1666,7 +1666,7 @@ impl Writer {
                     .is_some_and(|m| m.iter().flatten().any(|v| *v != 0.0))
             };
             let mut to_map = vec![format!("gen.{index}")];
-            if nonzero(&rs) && nonzero(&xs) {
+            if nonzero(&rs) || nonzero(&xs) {
                 // The Thevenin source: an ideal bus behind the impedance.
                 let bus_index = self.buses.len() + 1;
                 let grounded: Vec<bool> = self.buses[gen_bus - 1]

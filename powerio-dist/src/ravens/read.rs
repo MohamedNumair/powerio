@@ -821,6 +821,7 @@ impl Mapper<'_> {
             // dss reader's convention); the continuous limit rides in the
             // line's extras as `normamps`.
             let mut extras = extras_with_mrid(obj);
+            let mut i_max = None;
             if let Some(set) = &from.limit_set {
                 let set_name = set.clone();
                 let limits = limit_set(self.doc, &set_name);
@@ -844,14 +845,9 @@ impl Mapper<'_> {
                         }
                     }
                     if conflicts {
-                        self.warn(
-                            &C::READ_RAVENS_DIST_VALUE_CONFLICT,
-                            format!(
-                                "line {name}: emergency ampacity {emerg} conflicts with an \
-                             earlier line sharing linecode {code_name}; keeping the first \
-                             value"
-                            ),
-                        );
+                        // Limits belong to the segment. Keep the first
+                        // shared default, with differing values on the line.
+                        i_max = Some(vec![emerg; n]);
                     }
                 }
             }
@@ -882,6 +878,7 @@ impl Mapper<'_> {
                 code_name,
                 length,
             );
+            line.i_max = i_max;
             line.extras = extras;
             self.net.lines_mut().push(line);
         }

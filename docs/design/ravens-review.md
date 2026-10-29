@@ -103,3 +103,62 @@ not prove universal electrical equivalence. Unsupported controls and fields
 remain explicit fidelity findings. Input dimension limits prevent the
 demonstrated allocation amplification; they are not a global process-memory
 budget for arbitrarily large networks.
+
+## Frederik Geth review follow-up, 2026-10-29
+
+Fred's [follow-up review](https://github.com/eigenergy/powerio/pull/746#pullrequestreview-5690845743)
+confirmed that neutral restoration, switched neutrals and inactive equipment
+were addressed. Its two remaining reproductions failed on `8e30071` exactly
+as reported: the five tests returned three passes and two failures.
+
+- The PMD MATHEMATICAL source writer now emits the Thevenin branch when
+  either resistance or reactance is nonzero. An absent component becomes a
+  zero matrix; an entirely ideal source still fixes its bus voltage directly.
+- The multiconductor RAVENS writer gives `DistLine.i_max` precedence over
+  its linecode default. The reader keeps distinct segment limits as line
+  overrides when several segments share a linecode. Unequal per-conductor
+  overrides receive the existing scalar-collapse diagnostic.
+
+`powerio-dist/tests/review_followup.rs` commits Fred's five reproductions and
+four additional tests. All nine pass. The additional cases check resistance
+and reactance separately, absent components, an ideal-source control, every
+emitted matrix entry in physical ohms, source readback, lower/higher/zero
+current overrides, the linecode fallback, shared-linecode limits, and the
+nonuniform-limit diagnostic. Every reproduction bypasses retained-source echo.
+No new fixtures, public APIs, IR layouts or Julia changes are needed. Fred
+[approved the Julia companion](https://github.com/eigenergy/PowerIO.jl/pull/197#pullrequestreview-5690878535)
+at `e5c714d126d8c5548bc944feb0c189540c9fe58e`.
+
+Reproduce the focused review checks from the repository root:
+
+```sh
+cargo test -p powerio-dist --test review_followup -- --nocapture
+cargo test -p powerio-dist
+cargo test -p powerio-cli --test conversion_matrix_report
+cargo fmt --all --check
+bash scripts/ci-clippy.sh
+```
+
+Local validation of this follow-up passed: 896 distribution tests (18
+ignored), all 14 conversion-matrix tests without a baseline change, all seven
+Clippy configurations, formatting, whitespace and terminology checks.
+The complete cross-platform, native-oracle and paired Julia workflows run on
+GitHub for the follow-up commit; consult that commit's checks for their final
+status rather than treating the previous green head as current evidence.
+
+### Prompt for a fresh session
+
+Continue the MG-RAVENS handoff from GitHub, not an old local checkout.
+Read eigenergy/powerio#746, its current head and checks, this document, and
+Frederik Geth's latest review. The two remaining requested changes have fixes
+and nine passing regression tests in `powerio-dist/tests/review_followup.rs`.
+The previous six independent reviews and their verified fixes are already
+recorded above; do not restart that work. PowerIO.jl#197 is approved at
+`e5c714d126d8c5548bc944feb0c189540c9fe58e` and needs no follow-up code.
+Inspect CI for the current Rust head, fix any attributable failure, and
+respond to any new review findings. Preserve all existing commits and push
+any further work to `feat/ravens-json-pmd-math` with a fast-forward update.
+Keep the PR ready for review and request Fred's re-review if it is not already
+requested. Do not dismiss his review or merge/release without an explicit
+instruction. All necessary source, regression tests and handoff context are
+on GitHub; no files from the previous session are required.

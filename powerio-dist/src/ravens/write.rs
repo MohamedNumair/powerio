@@ -709,9 +709,14 @@ impl Writer {
                 }
             };
             let limit = {
-                let emerg = net
-                    .linecode(&line.linecode)
-                    .and_then(|c| c.i_max.as_ref())
+                // A segment can override its shared linecode's ampacity.
+                if let Some(limits) = &line.i_max {
+                    self.warn_nonuniform(&what, "ampacity", limits);
+                }
+                let emerg = line
+                    .i_max
+                    .as_ref()
+                    .or_else(|| net.linecode(&line.linecode).and_then(|c| c.i_max.as_ref()))
                     .and_then(|v| v.first().copied());
                 let norm = xf64(&line.extras, "normamps");
                 match (norm, emerg) {
