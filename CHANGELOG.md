@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- The `cim-dist` reader maps the Schneider Electric ADMS extension of CIM16
+  (`sedms:`), so the LV networks such an ADMS exports read into
+  `MulticonductorNetwork` and convert to every distribution format. Each
+  `UsagePoint` is a load at its service location, each `FlexibleLoad` an
+  inverter based resource, and when the documents define no
+  `EnergySource`, the nodes that `sedms:ConnectivityNode.stitchingInfo`
+  marks join a new busbar through closed switches, with an ideal source at
+  their rated voltage. The mapping applies only to documents that use the
+  extension namespace, and every value it fills in is a `READ.CIM_DIST.*`
+  finding.
+
 - The `cim-dist` reader reads CIM16 LV feeders stated with sequence
   impedances and no per phase class. A header-less CIM document with the
   IEC 61968 customer classes (`ServiceLocation`, `UsagePoint`) now routes to

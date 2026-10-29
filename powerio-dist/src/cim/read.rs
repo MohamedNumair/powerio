@@ -25,12 +25,14 @@ use super::{
 use crate::diagnostics::{Diagnostic, DiagnosticInfo, codes as C};
 use crate::geo::{CoordinateSpace, DistCoordsKind, DistGeoMeta, DistLocation};
 use crate::model::{
-    ConductorMatrix, Configuration, DistBus, DistLine, DistLineCode, DistLoad, DistShunt,
-    DistSourceFormat, DistSwitch, DistTransformer, DistWinding, DistWindingConn,
-    MulticonductorNetwork, MulticonductorNetworkTables, VoltageSource,
+    ConductorMatrix, Configuration, DistBus, DistIbr, DistLine, DistLineCode, DistLoad, DistShunt,
+    DistSourceFormat, DistSwitch, DistTransformer, DistWinding, DistWindingConn, IbrPrimeMover,
+    IbrTopology, MulticonductorNetwork, MulticonductorNetworkTables, VoltageSource,
 };
 use crate::readiness::UNRESOLVED_IMPEDANCE_KEY;
 use crate::{Error, Result};
+
+mod sedms;
 
 const FMT: &str = "distribution CIM";
 
@@ -517,6 +519,41 @@ fn three_phases() -> Vec<String> {
     vec!["1".to_owned(), "2".to_owned(), "3".to_owned()]
 }
 
+/// A wye source on `phases` with a grounded neutral (terminal 4): the line
+/// to neutral magnitude of `n` phases spaced 2π/n apart from the line to
+/// line `v_ll` (the dss convention), the first phase at `angle`.
+fn wye_source(
+    name: String,
+    bus: String,
+    phases: Vec<String>,
+    v_ll: f64,
+    angle: f64,
+) -> VoltageSource {
+    let n = phases.len();
+    let v_ln = if n >= 2 {
+        v_ll / (2.0 * (PI / n as f64).sin())
+    } else {
+        v_ll
+    };
+    let map = with_neutral(phases, Configuration::Wye);
+    let v_magnitude = map
+        .iter()
+        .map(|t| if t == "4" { 0.0 } else { v_ln })
+        .collect();
+    let v_angle = map
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            if t == "4" {
+                0.0
+            } else {
+                wrap_angle(angle - (i as f64) * 2.0 * PI / n as f64)
+            }
+        })
+        .collect();
+    VoltageSource::new(name, bus, map, v_magnitude, v_angle)
+}
+
 /// The shape each diagram object draws, by the mRID of the element it
 /// draws: its points in order.
 type Shapes = HashMap<String, Vec<(f64, f64)>>;
@@ -553,8 +590,10 @@ fn read_documents(
     let mut store = Store::new();
     let mut namespaces = BTreeSet::new();
     let mut description = None;
+    let mut sedms = false;
     for (name, doc) in docs {
         namespaces.extend(doc.cim_namespaces.iter().cloned());
+        sedms |= sedms::uses_extension(&doc);
         if description.is_none() {
             description = doc
                 .header
@@ -590,45 +629,41 @@ fn read_documents(
     }
 
     let mut mapper = Mapper::new(&store, diags);
+    mapper.sedms = sedms;
     mapper.validate_electrical_state()?;
     let (line_codes, mut lines) = mapper.lines();
-    let loads = mapper.loads();
+    let mut loads = mapper.loads();
     let shunts = mapper.shunts()?;
     let switches = mapper.switches();
     let transformers = mapper.transformers()?;
-    let sources = mapper.sources();
+    let mut sources = mapper.sources();
+    let extension = if sedms {
+        mapper.sedms_extension()
+    } else {
+        sedms::Extension::default()
+    };
+    loads.extend(extension.loads);
+    let (ibrs, supply) = (extension.ibrs, extension.supply);
+    // The supply switches are the generic `Switch` class, the first class the
+    // switch mapping reads, so they lead and a CIM rewrite reads back in the
+    // same order.
+    let switches: Vec<DistSwitch> = supply.switches.into_iter().chain(switches).collect();
+    sources.extend(supply.sources);
     let layout = mapper.layout(&mut lines);
 
-    // Each bus presents the terminals its elements connect.
-    let mut used: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    let mut connect = |bus: &str, terminals: &[String]| {
-        used.entry(bus.to_ascii_lowercase())
-            .or_default()
-            .extend(terminals.iter().cloned());
-    };
-    for line in &lines {
-        connect(&line.bus_from, &line.terminal_map_from);
-        connect(&line.bus_to, &line.terminal_map_to);
-    }
-    for switch in &switches {
-        connect(&switch.bus_from, &switch.terminal_map_from);
-        connect(&switch.bus_to, &switch.terminal_map_to);
-    }
-    for load in &loads {
-        connect(&load.bus, &load.terminal_map);
-    }
-    for shunt in &shunts {
-        connect(&shunt.bus, &shunt.terminal_map);
-    }
-    for winding in transformers.iter().flat_map(|t| &t.windings) {
-        connect(&winding.bus, &winding.terminal_map);
-    }
-    for source in &sources {
-        connect(&source.bus, &source.terminal_map);
-    }
-    let mut buses = derive_buses(&mapper.nodes, &used);
+    let used = terminal_usage(
+        &lines,
+        &switches,
+        &loads,
+        &ibrs,
+        &shunts,
+        &transformers,
+        &sources,
+    );
+    let mut buses = derive_buses(&mapper.nodes, &supply.buses, &used);
     let geo = layout.map(|layout| {
         locate_buses(&mut buses, &layout);
+        sedms::locate_busbars(&mut buses, &switches, &supply.buses);
         layout.meta
     });
     let base_frequency = mapper.base_frequency(cim16);
@@ -648,6 +683,7 @@ fn read_documents(
         switches,
         transformers,
         loads,
+        ibrs,
         shunts,
         sources,
         ..MulticonductorNetworkTables::default()
@@ -750,13 +786,20 @@ struct Mapper<'a> {
     dropped: HashSet<String>,
     /// Objects of an otherwise unmapped class the mapping read (the feeder
     /// that names the network, the catalog entries tanks and segment ratings
-    /// come from, the diagram the layout reads).
+    /// come from, the diagram the layout reads, the usage points and service
+    /// locations loads come from).
     consumed: HashSet<String>,
     /// Transformer catalog entries read so far, by `TransformerTankInfo`
     /// mRID; `None` for one without end infos.
     catalogs: HashMap<String, Option<Rc<Catalog>>>,
     /// Core admittances a transformer read.
     core_read: HashSet<String>,
+    /// Whether the documents use the Schneider Electric ADMS extension
+    /// ([`sedms`]).
+    sedms: bool,
+    /// Service locations already resolved, so the usage points and
+    /// resources that share one report its findings once.
+    service_points: HashMap<String, Option<sedms::ServicePoint>>,
 }
 
 impl<'a> Mapper<'a> {
@@ -775,6 +818,8 @@ impl<'a> Mapper<'a> {
             consumed: HashSet::new(),
             catalogs: HashMap::new(),
             core_read: HashSet::new(),
+            sedms: false,
+            service_points: HashMap::new(),
         };
         mapper.build_wiring();
         mapper.name_nodes();
@@ -3357,7 +3402,6 @@ impl<'a> Mapper<'a> {
                 self.drop_record("EnergySource", &id, "no readable phase");
                 continue;
             }
-            let n = phases.len();
             let label = self.label(&id);
             let v_ll = self
                 .store
@@ -3375,35 +3419,13 @@ impl<'a> Mapper<'a> {
                 );
                 0.0
             });
-            // A line to line magnitude to the per terminal line to neutral
-            // magnitude of n phases spaced 2π/n apart (the dss convention).
-            let v_ln = if n >= 2 {
-                v_ll / (2.0 * (PI / n as f64).sin())
-            } else {
-                v_ll
-            };
             let base_angle = self
                 .store
                 .f(&id, "EnergySource.voltageAngle")
                 .unwrap_or(0.0);
-            let map = with_neutral(phases, Configuration::Wye);
-            let v_magnitude = map
-                .iter()
-                .map(|t| if t == "4" { 0.0 } else { v_ln })
-                .collect();
-            let v_angle = map
-                .iter()
-                .enumerate()
-                .map(|(i, t)| {
-                    if t == "4" {
-                        0.0
-                    } else {
-                        wrap_angle(base_angle - (i as f64) * 2.0 * PI / n as f64)
-                    }
-                })
-                .collect();
             let name = self.unique_name("source", "EnergySource", &id);
-            let mut source = VoltageSource::new(name, bus, map.clone(), v_magnitude, v_angle);
+            let mut source = wye_source(name, bus, phases, v_ll, base_angle);
+            let map = source.terminal_map.clone();
             let impedance = |key: &str| self.store.f(&id, key);
             let (r1, x1) = (impedance("EnergySource.r"), impedance("EnergySource.x"));
             let (r0, x0) = (impedance("EnergySource.r0"), impedance("EnergySource.x0"));
@@ -3445,8 +3467,9 @@ impl<'a> Mapper<'a> {
     /// route, the first at terminal 1. A connectivity node has no diagram
     /// object of its own, so it takes the end of the first segment there
     /// (segment ends meet at the nodes they share), else the point of other
-    /// equipment at it or of the composite switch that holds a switch; these
-    /// node locations are derived. `None` when the layout places nothing.
+    /// equipment at it or of the composite switch that holds a switch, else,
+    /// with the [`sedms`] extension, the point of a service location served
+    /// from it; these node locations are derived. `None` when the layout places nothing.
     fn layout(&mut self, lines: &mut [DistLine]) -> Option<Layout> {
         let (space, shape_of) = self.diagram_shapes()?;
         let mut placed = false;
@@ -3493,6 +3516,9 @@ impl<'a> Mapper<'a> {
                 self.place_terminals(&owner, shape, &mut at_node);
             }
         }
+        if self.sedms {
+            self.place_service_locations(&shape_of, &mut at_node);
+        }
         placed |= !at_node.is_empty();
         placed.then_some(Layout {
             meta: DistGeoMeta {
@@ -3507,7 +3533,8 @@ impl<'a> Mapper<'a> {
     /// `EPSG:` coordinate reference system, else the first) and the shape of
     /// each element its `DiagramObject`s draw: their `DiagramObjectPoint`s in
     /// `sequenceNumber` order. A named CRS makes the coordinates projected
-    /// (geographic for EPSG:4326), and a diagram without one is a drawing.
+    /// (geographic for EPSG:4326), a [`sedms`] GIS diagram projected with no
+    /// CRS, and anything else a drawing.
     fn diagram_shapes(&mut self) -> Option<(CoordinateSpace, Shapes)> {
         let diagrams = self.store.ids_of("Diagram");
         let named: Vec<Option<String>> = diagrams.iter().map(|d| self.diagram_crs(d)).collect();
@@ -3516,6 +3543,9 @@ impl<'a> Mapper<'a> {
         let space = match named[at].clone() {
             Some(crs) if crs == "EPSG:4326" => CoordinateSpace::Geographic { crs: Some(crs) },
             Some(crs) => CoordinateSpace::Projected { crs: Some(crs) },
+            None if self.sedms && self.sedms_gis_diagram(&diagram) => {
+                CoordinateSpace::Projected { crs: None }
+            }
             None => CoordinateSpace::Diagram { canvas: None },
         };
         self.consumed.insert(diagram.clone());
@@ -3724,31 +3754,81 @@ fn locate_buses(buses: &mut [DistBus], layout: &Layout) {
     }
 }
 
-/// Buses from the connectivity nodes, with each bus's terminals taken from
-/// the terminals the elements present there (so a wye element's grounded
-/// neutral appears on its bus). A neutral terminal reads as perfectly
-/// grounded, the wire coordinate convention shared with the dss reader.
+/// The terminals each bus presents: the ones its elements connect, by lower
+/// case bus id.
+fn terminal_usage(
+    lines: &[DistLine],
+    switches: &[DistSwitch],
+    loads: &[DistLoad],
+    ibrs: &[DistIbr],
+    shunts: &[DistShunt],
+    transformers: &[DistTransformer],
+    sources: &[VoltageSource],
+) -> BTreeMap<String, BTreeSet<String>> {
+    let mut used: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut connect = |bus: &str, terminals: &[String]| {
+        used.entry(bus.to_ascii_lowercase())
+            .or_default()
+            .extend(terminals.iter().cloned());
+    };
+    for line in lines {
+        connect(&line.bus_from, &line.terminal_map_from);
+        connect(&line.bus_to, &line.terminal_map_to);
+    }
+    for switch in switches {
+        connect(&switch.bus_from, &switch.terminal_map_from);
+        connect(&switch.bus_to, &switch.terminal_map_to);
+    }
+    for load in loads {
+        connect(&load.bus, &load.terminal_map);
+    }
+    for ibr in ibrs {
+        connect(&ibr.bus, &ibr.terminal_map);
+    }
+    for shunt in shunts {
+        connect(&shunt.bus, &shunt.terminal_map);
+    }
+    for winding in transformers.iter().flat_map(|t| &t.windings) {
+        connect(&winding.bus, &winding.terminal_map);
+    }
+    for source in sources {
+        connect(&source.bus, &source.terminal_map);
+    }
+    used
+}
+
+/// Buses from the connectivity nodes, then the supply busbars the reader
+/// placed, with each bus's terminals taken from the terminals the elements
+/// present there (so a wye element's grounded neutral appears on its bus). A
+/// neutral terminal reads as perfectly grounded, the wire coordinate
+/// convention shared with the dss reader.
 fn derive_buses(
     nodes: &[(String, String)],
+    busbars: &[String],
     used: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<DistBus> {
+    let bus = |bus_id: &str| {
+        let terminals: Vec<String> = used
+            .get(&bus_id.to_ascii_lowercase())
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default();
+        let grounded = if terminals.iter().any(|t| t == "4") {
+            vec!["4".to_owned()]
+        } else {
+            Vec::new()
+        };
+        let mut bus = DistBus::new(bus_id, terminals);
+        bus.grounded = grounded;
+        bus
+    };
     nodes
         .iter()
         .map(|(bus_id, mrid)| {
-            let terminals: Vec<String> = used
-                .get(&bus_id.to_ascii_lowercase())
-                .map(|set| set.iter().cloned().collect())
-                .unwrap_or_default();
-            let grounded = if terminals.iter().any(|t| t == "4") {
-                vec!["4".to_owned()]
-            } else {
-                Vec::new()
-            };
-            let mut bus = DistBus::new(bus_id.clone(), terminals);
-            bus.grounded = grounded;
+            let mut bus = bus(bus_id);
             bus.extras.insert("cim_mrid".into(), mrid.clone().into());
             bus
         })
+        .chain(busbars.iter().map(|bus_id| bus(bus_id)))
         .collect()
 }
 

@@ -2122,3 +2122,372 @@ fn a_cim16_layout_locates_buses_and_routes_segments() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// CIM16 LV exports with the Schneider Electric ADMS extension
+// ---------------------------------------------------------------------------
+//
+// The feeder below is synthetic: hand written in the shape of the export,
+// with invented names, values, and coordinates. It reuses the CIM16 helpers
+// above.
+
+const ADMS_OPEN: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF xmlns:cim="http://iec.ch/TC57/2013/CIM-schema-cim16#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:sedms="http://www.schneider-electric-dms.com/CIM16v33/2017/extension">
+"#;
+
+/// A service location served from a fuse's downstream terminal, and the
+/// usage points (meters) there with their demand.
+fn adms_customer(location: &str, terminal: &str, phases: &str, meters: &[(&str, &str)]) -> String {
+    let mut text = format!(
+        r##"  <cim:ServiceLocation rdf:ID="_{location}">
+    <sedms:ServiceLocation.Terminal rdf:resource="#_{terminal}" />
+    <sedms:ServiceLocation.phases>{phases}</sedms:ServiceLocation.phases>
+    <cim:IdentifiedObject.name>{location}</cim:IdentifiedObject.name>
+  </cim:ServiceLocation>
+"##
+    );
+    for (meter, powers) in meters {
+        let _ = write!(
+            text,
+            r##"  <cim:UsagePoint rdf:ID="{meter}">
+    <cim:UsagePoint.ServiceLocation rdf:resource="#_{location}" />
+{powers}    <cim:IdentifiedObject.name>{meter}</cim:IdentifiedObject.name>
+  </cim:UsagePoint>
+"##
+        );
+    }
+    text
+}
+
+/// The GIS layout of [`adms_feeder`], with made up projected coordinates and
+/// the segment's points listed out of sequence.
+fn adms_layout() -> String {
+    let mut text = r#"  <cim:Diagram rdf:ID="_GIS">
+    <sedms:Diagram.type>GIS</sedms:Diagram.type>
+    <cim:IdentifiedObject.name>EPSG:3857</cim:IdentifiedObject.name>
+  </cim:Diagram>
+"#
+    .to_owned();
+    text.push_str(&cim16_drawing(
+        "AC1",
+        &[
+            (2, 1_010.0, 2_005.0),
+            (1, 1_000.0, 2_000.0),
+            (3, 1_020.0, 2_000.0),
+        ],
+    ));
+    text.push_str(&cim16_drawing("CS1", &[(1, 1_021.0, 2_000.5)]));
+    text.push_str(&cim16_drawing("FU4", &[(1, 1_022.0, 1_999.0)]));
+    text.push_str(&cim16_drawing("SL_HOUSE", &[(1, 1_021.0, 2_000.5)]));
+    text
+}
+
+/// A synthetic LV feeder in the form the ADMS exports: CIM16 with the
+/// `sedms` extension, enumerations as text, single phase fuses grouped by a
+/// composite switch, customers as usage points at service locations, a
+/// rooftop PV unit as a flexible load, a GIS layout, and no source: the head
+/// node is stitched to the substation the export leaves out.
+fn adms_feeder() -> String {
+    let mut text = ADMS_OPEN.to_owned();
+    text.push_str(
+        r##"  <cim:Circuit rdf:ID="_LV_NET">
+    <sedms:Circuit.isMaster>true</sedms:Circuit.isMaster>
+    <cim:IdentifiedObject.name>LV network 1</cim:IdentifiedObject.name>
+  </cim:Circuit>
+  <cim:Circuit rdf:ID="_FEEDER_1">
+    <sedms:Circuit.circuitType>LVFeeder</sedms:Circuit.circuitType>
+  </cim:Circuit>
+  <cim:ConnectivityNode rdf:ID="_CN_HEAD">
+    <sedms:ConnectivityNode.stitchingInfo>LV</sedms:ConnectivityNode.stitchingInfo>
+    <sedms:ConnectivityNode.connectedCircuits>_MV_FEEDER#_LV_NET</sedms:ConnectivityNode.connectedCircuits>
+    <cim:ConnectivityNode.ConnectivityNodeContainer rdf:resource="#_FEEDER_1" />
+    <cim:IdentifiedObject.name>CN_HEAD</cim:IdentifiedObject.name>
+  </cim:ConnectivityNode>
+  <cim:ConnectivityNode rdf:ID="_CN_CABINET"><cim:IdentifiedObject.name>CN_CABINET</cim:IdentifiedObject.name></cim:ConnectivityNode>
+  <cim:ConnectivityNode rdf:ID="_CN_HOUSE"><cim:IdentifiedObject.name>CN_HOUSE</cim:IdentifiedObject.name></cim:ConnectivityNode>
+  <cim:ConnectivityNode rdf:ID="_CN_FLAT"><cim:IdentifiedObject.name>CN_FLAT</cim:IdentifiedObject.name></cim:ConnectivityNode>
+  <cim:WireInfo rdf:ID="_WI">
+    <cim:WireInfo.ratedCurrent>140.0</cim:WireInfo.ratedCurrent>
+    <cim:IdentifiedObject.name>Cable type A</cim:IdentifiedObject.name>
+  </cim:WireInfo>
+  <cim:PerLengthSequenceImpedance rdf:ID="_PLI">
+    <cim:PerLengthSequenceImpedance.r>0.0004</cim:PerLengthSequenceImpedance.r>
+    <cim:PerLengthSequenceImpedance.x>0.00008</cim:PerLengthSequenceImpedance.x>
+    <cim:PerLengthSequenceImpedance.r0>0.0012</cim:PerLengthSequenceImpedance.r0>
+    <cim:PerLengthSequenceImpedance.x0>0.0003</cim:PerLengthSequenceImpedance.x0>
+    <cim:IdentifiedObject.name>LV_cable_4x70</cim:IdentifiedObject.name>
+  </cim:PerLengthSequenceImpedance>
+  <cim:ACLineSegment rdf:ID="_AC1">
+    <cim:ACLineSegment.PerLengthImpedance rdf:resource="#_PLI" />
+    <cim:Conductor.length>50.0</cim:Conductor.length>
+    <sedms:ConductingEquipment.ratedVoltage>400.0000059604645</sedms:ConductingEquipment.ratedVoltage>
+    <cim:PowerSystemResource.AssetDatasheet rdf:resource="#_WI" />
+    <cim:IdentifiedObject.name>AC1</cim:IdentifiedObject.name>
+  </cim:ACLineSegment>
+  <cim:CompositeSwitch rdf:ID="_CS1"><cim:IdentifiedObject.name>CS1</cim:IdentifiedObject.name></cim:CompositeSwitch>
+"##,
+    );
+    text.push_str(&cim16_terminal("AC1_t1", "AC1", "CN_HEAD", "ABC", 1));
+    text.push_str(&cim16_terminal("AC1_t2", "AC1", "CN_CABINET", "ABC", 2));
+    for (fuse, phase) in [("FU1", "A"), ("FU2", "B"), ("FU3", "C")] {
+        text.push_str(&cim16_fuse(
+            fuse,
+            "CN_CABINET",
+            "CN_HOUSE",
+            phase,
+            Some("CS1"),
+        ));
+    }
+    text.push_str(&cim16_fuse("FU4", "CN_CABINET", "CN_FLAT", "B", None));
+    let p = |w: &str, var: &str| {
+        format!(
+            "    <sedms:UsagePoint.p>{w}</sedms:UsagePoint.p>\n    <sedms:UsagePoint.q>{var}</sedms:UsagePoint.q>\n"
+        )
+    };
+    let (house_1, house_2, flat) = (
+        p("3000.0", "300.0"),
+        p("600.0", "0.0"),
+        p("1000.0", "100.0"),
+    );
+    let pv_meter = "    <sedms:UsagePoint.p>150.0</sedms:UsagePoint.p>\n".to_owned();
+    text.push_str(&adms_customer(
+        "SL_HOUSE",
+        "FU1_t2",
+        "ABCN",
+        &[("1", &house_1), ("2", &house_2)],
+    ));
+    text.push_str(&adms_customer("SL_FLAT", "FU4_t2", "BN", &[("3", &flat)]));
+    text.push_str(&adms_customer(
+        "SL_PV",
+        "FU2_t2",
+        "ABC",
+        &[("4", &pv_meter)],
+    ));
+    text.push_str(&adms_layout());
+    text.push_str(
+        r##"  <cim:FlexibleLoad rdf:ID="_FL1">
+    <sedms:FlexibleLoad.pMax>9000.0</sedms:FlexibleLoad.pMax>
+    <sedms:FlexibleLoad.pAvg>1500.0</sedms:FlexibleLoad.pAvg>
+    <sedms:FlexibleLoad.Customer rdf:resource="#4" />
+    <sedms:FlexibleLoad.dispatchable>false</sedms:FlexibleLoad.dispatchable>
+    <sedms:FlexibleLoad.resourceType>SolarPanel</sedms:FlexibleLoad.resourceType>
+    <cim:IdentifiedObject.name>PV1</cim:IdentifiedObject.name>
+  </cim:FlexibleLoad>
+</rdf:RDF>
+"##,
+    );
+    text
+}
+
+#[test]
+#[allow(clippy::float_cmp)] // exact literals and exact even splits are the assertion
+fn an_adms_feeder_maps_customers_generation_and_supply() {
+    let text = adms_feeder();
+    // Routed from the name and the content: usage points mark distribution
+    // CIM in a document with no per phase class.
+    assert!(powerio_dist::looks_like_cim_dist(text.as_bytes()));
+    let source = powerio_core::Source::from_memory("adms.xml", text.as_bytes().to_vec()).unwrap();
+    assert!(powerio_dist::source_looks_like_cim_dist(&source));
+    let net = parse_str(&text, "cim-dist").unwrap();
+    assert_eq!(net.base_frequency(), 50.0, "{:#?}", net.warnings);
+
+    // The phase codes stated as text are read: no element defaults to ABC.
+    assert!(
+        !net.warnings
+            .iter()
+            .any(|w| w.contains("no phases are stated")),
+        "{:#?}",
+        net.warnings
+    );
+    let switch = |name: &str| net.switches().iter().find(|s| s.name == name).unwrap();
+    for (fuse, phase) in [("FU1", "1"), ("FU2", "2"), ("FU3", "3"), ("FU4", "2")] {
+        let fuse = switch(fuse);
+        assert_eq!(fuse.terminal_map_from, strings(&[phase]));
+        assert_eq!(fuse.terminal_map_to, strings(&[phase]));
+        assert!(!fuse.open);
+    }
+
+    // The segment: its sequence impedance under the catalog name, and the
+    // ampacity of its wire catalog entry.
+    let line = &net.lines()[0];
+    assert_eq!(line.linecode, "LV_cable_4x70");
+    assert_eq!(line.i_max, Some(vec![140.0; 3]));
+
+    // One load per usage point, the stated powers shared over the phases of
+    // the service location: wye with the neutral, delta without it.
+    let load = |name: &str| net.loads().iter().find(|l| l.name == name).unwrap();
+    let house = load("1");
+    assert_eq!(house.bus, "CN_HOUSE");
+    assert_eq!(house.terminal_map, strings(&["1", "2", "3", "4"]));
+    assert_eq!(house.configuration, Configuration::Wye);
+    assert_eq!(house.p_nom, vec![1000.0; 3]);
+    assert_eq!(house.q_nom, vec![100.0; 3]);
+    assert_eq!(load("2").p_nom, vec![200.0; 3]);
+    let flat = load("3");
+    assert_eq!(flat.bus, "CN_FLAT");
+    assert_eq!(flat.terminal_map, strings(&["2", "4"]));
+    assert_eq!(flat.configuration, Configuration::SinglePhase);
+    assert_eq!(
+        (flat.p_nom.clone(), flat.q_nom.clone()),
+        (vec![1000.0], vec![100.0])
+    );
+    let pv_meter = load("4");
+    assert_eq!(pv_meter.configuration, Configuration::Delta);
+    assert_eq!(pv_meter.terminal_map, strings(&["1", "2", "3"]));
+    assert_eq!(pv_meter.q_nom, vec![0.0; 3]);
+
+    // The rooftop PV: a three leg inverter (the location has no neutral)
+    // that holds its average output, not dispatchable.
+    let [pv] = net.ibrs().as_slice() else {
+        panic!("{:?}", net.ibrs())
+    };
+    assert_eq!(pv.name, "PV1");
+    assert_eq!(pv.bus, "CN_HOUSE");
+    assert_eq!(pv.topology, powerio_dist::IbrTopology::ThreeLeg);
+    assert_eq!(pv.prime_mover, powerio_dist::IbrPrimeMover::Pv);
+    assert_eq!(pv.terminal_map, strings(&["1", "2", "3"]));
+    assert_eq!(pv.s_max, vec![3000.0; 3]);
+    assert_eq!(pv.p_min, Some(vec![500.0; 3]));
+    assert_eq!(pv.p_max, pv.p_min);
+    assert_eq!(pv.q_min, Some(vec![0.0; 3]));
+
+    // The supply the export leaves out: a busbar, a closed switch to the
+    // stitched head named after its feeder, and an ideal source at the
+    // rated 400 V (stated through single precision kilovolts).
+    let busbar = net.buses().iter().find(|b| b.id == "sourcebus").unwrap();
+    assert_eq!(busbar.terminals, strings(&["1", "2", "3", "4"]));
+    assert_eq!(busbar.grounded, strings(&["4"]));
+    let feeder = switch("FEEDER_1");
+    assert_eq!(
+        (feeder.bus_from.as_str(), feeder.bus_to.as_str()),
+        ("sourcebus", "CN_HEAD")
+    );
+    assert_eq!(feeder.terminal_map_from, strings(&["1", "2", "3"]));
+    let [source] = net.sources().as_slice() else {
+        panic!("{:?}", net.sources())
+    };
+    assert_eq!(
+        (source.name.as_str(), source.bus.as_str()),
+        ("source", "sourcebus")
+    );
+    assert!(close(source.v_magnitude[0], 400.0 / 3f64.sqrt()));
+    assert_eq!(source.v_magnitude[3], 0.0);
+
+    // Every assumption is a finding, and the groupings are context.
+    for expected in [
+        "50 Hz is assumed for the CIM16 namespace",
+        "places the ideal source `source` there at their rated 400 V",
+        "no sedms:UsagePoint.q; 0 is used",
+    ] {
+        assert!(
+            net.warnings.iter().any(|w| w.contains(expected)),
+            "missing `{expected}` in {:#?}",
+            net.warnings
+        );
+    }
+    let unmapped = findings(&net.warnings, "READ.CIM_DIST.CLASS_UNMAPPED");
+    assert_eq!(unmapped, Vec::<&String>::new());
+    for class in ["CompositeSwitch", "Circuit"] {
+        assert!(
+            net.warnings
+                .iter()
+                .any(|w| w.starts_with("READ.CIM_DIST.CONTEXT_UNMAPPED") && w.contains(class)),
+            "{class}: {:#?}",
+            net.warnings
+        );
+    }
+}
+
+#[test]
+fn an_adms_feeder_converts_to_every_distribution_format() {
+    // Once in the multiconductor model, the export writes as every
+    // distribution format through the shared writers: no target needs a
+    // bridge of its own.
+    let net = parse_str(&adms_feeder(), "cim-dist").unwrap();
+    for (target, token) in [
+        (DistTargetFormat::Dss, "dss"),
+        (DistTargetFormat::PmdJson, "pmd-json"),
+        (DistTargetFormat::BmopfJson, "bmopf-json"),
+        (DistTargetFormat::CimDist, "cim-dist"),
+    ] {
+        let out = emit_value(&net, target);
+        let back = parse_str(&out.text, token)
+            .unwrap_or_else(|e| panic!("{}: {e}\n{}", target.name(), out.text));
+        // OpenDSS states an ideal source per phase, so only its presence
+        // is format neutral.
+        assert_ne!(back.sources().as_slice(), [], "{}", target.name());
+        assert_eq!(back.loads().len(), net.loads().len(), "{}", target.name());
+        assert!(
+            close(back.base_frequency(), 50.0),
+            "{}: {} Hz",
+            target.name(),
+            back.base_frequency()
+        );
+    }
+
+    // The canonical CIM100 rewrite resolves every reference, and a second
+    // write is byte identical.
+    let first = emit_value(&net, DistTargetFormat::CimDist);
+    assert_references_resolve(&first.text, std::path::Path::new("adms feeder"));
+    let back = parse_str(&first.text, "cim-dist").unwrap();
+    assert_eq!(
+        emit_value(&back, DistTargetFormat::CimDist).text,
+        first.text
+    );
+}
+
+#[test]
+#[allow(clippy::float_cmp)] // the source coordinates are the assertion
+fn an_adms_layout_locates_buses_and_routes_segments() {
+    use powerio_dist::{CoordinateSpace, DistCoordsKind};
+
+    let net = parse_str(&adms_feeder(), "cim-dist").unwrap();
+    let geo = net
+        .geo()
+        .clone()
+        .expect("the GIS diagram gives coordinates");
+    assert_eq!(
+        geo.space,
+        CoordinateSpace::Projected {
+            crs: Some("EPSG:3857".into())
+        }
+    );
+    // The segment's route in sequence order, terminal 1 first.
+    let route: Vec<(f64, f64)> = net.lines()[0]
+        .route
+        .as_ref()
+        .unwrap()
+        .iter()
+        .map(|p| (p.x, p.y))
+        .collect();
+    assert_eq!(
+        route,
+        [(1_000.0, 2_000.0), (1_010.0, 2_005.0), (1_020.0, 2_000.0)]
+    );
+    let at = |id: &str| {
+        let bus = net.buses().iter().find(|b| b.id == id).unwrap();
+        let location = bus
+            .location
+            .unwrap_or_else(|| panic!("{id} has no location"));
+        assert_eq!(location.kind, Some(DistCoordsKind::Derived), "{id}");
+        (location.x, location.y)
+    };
+    // Segment ends place the nodes they reach; the customer side of the
+    // cabinet takes its composite switch, the flat its own fuse, and the
+    // supply busbar the stitched node it feeds.
+    assert_eq!(at("CN_HEAD"), (1_000.0, 2_000.0));
+    assert_eq!(at("CN_CABINET"), (1_020.0, 2_000.0));
+    assert_eq!(at("CN_HOUSE"), (1_021.0, 2_000.5));
+    assert_eq!(at("CN_FLAT"), (1_022.0, 1_999.0));
+    assert_eq!(at("sourcebus"), (1_000.0, 2_000.0));
+    for class in ["Diagram", "DiagramObject", "DiagramObjectPoint"] {
+        assert!(
+            !net.warnings
+                .iter()
+                .any(|w| w.starts_with("READ.CIM_DIST.CLASS_UNMAPPED")
+                    && w.contains(&format!(" {class} object"))),
+            "{class}: {:#?}",
+            net.warnings
+        );
+    }
+}
