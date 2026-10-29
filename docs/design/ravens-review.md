@@ -2,25 +2,51 @@
 
 This records the review of [Rust #746](https://github.com/eigenergy/powerio/pull/746)
 and its [Julia companion #197](https://github.com/eigenergy/PowerIO.jl/pull/197).
-The format and fidelity chapters remain the user-facing contract.
+The format and fidelity chapters describe the supported behavior.
 
-## Ownership and compatibility
+## What this PR adds and where it belongs
 
-| Surface | Owner | Boundary |
-|---|---|---|
-| CIM identifiers, phase vocabulary and decoded profile detection | `powerio-core::cim` | No electrical model dependencies |
-| Balanced RAVENS | `powerio-tx::format::ravens` | Reads and writes `BalancedNetwork` |
-| Distribution RAVENS and PMD MATHEMATICAL | `powerio-dist` | Reads and writes `MulticonductorNetwork`; no tx dependency |
-| RAVENS profile selection | `powerio-tnd::formats::ravens` | Dispatches to the appropriate reader and refuses mixed profiles |
-| IR, catalog and public dispatch | `powerio` | One `ravens-json` token; family capabilities describe both profiles |
-| Python, C and Julia | Existing typed facade and ABI 7 | No new generated C entry points or Julia runtime API |
+MG-RAVENS can describe a balanced network or list individual phase and neutral
+conductors. PowerIO reads the data produced by the upstream MATPOWER converter
+into `BalancedNetwork`; it reads the data produced by the upstream OpenDSS
+converter into `MulticonductorNetwork`. Both use the format name
+`ravens-json`. The code calls these choices `Profile::Balanced` and
+`Profile::Multiconductor`; callers do not choose a separate format or flag.
 
-Retained source bytes belong to a parsed module, not its electrical value.
-Same-format emission can therefore be byte exact while canonical emission
-through PowerIO IR reports representational losses. Tests exercise both paths.
-The new source-format names use the next IR catalog, `pio-ir/2/0.11.8`;
-the released 0.11.7 schema is unchanged. IR stays at version 2. Existing
-public enum positions and serialized catalog shape remain compatible.
+| Operation | Owner |
+|---|---|
+| Read and write balanced RAVENS data | `powerio-tx::format::ravens` |
+| Read and write RAVENS data with individual conductors, and PMD MATHEMATICAL JSON | `powerio-dist` |
+| Inspect a RAVENS document and call the matching reader | `powerio-tnd::formats::ravens::parse` |
+| Public `parse` and `emit`, supported-format information, and PowerIO IR serialization | `powerio` |
+| Shared CIM identifiers, phase names, and detection of RAVENS record types | `powerio-core::cim` |
+
+The readers and writers stay with the network types they use. A program using
+only `powerio-tx` can use balanced RAVENS without depending on
+`powerio-dist`; distribution callers can use RAVENS without `powerio-tx`.
+The small selection function belongs in `powerio-tnd`, which already
+depends on both crates and also contains the SINCAL adapter.
+
+**Current limit:** the RAVENS function in `powerio-tnd` returns one of the
+two network types. It does not construct an `IntegratedNetwork`. A document
+containing record types that require both readers returns
+`PARSE.RAVENS.MIXED_PROFILE`. Supporting a combined transmission and
+distribution model in one RAVENS document remains future work.
+
+For review, check the numerical conversion in each reader and writer, and
+the documented losses below. The placement in `powerio-tnd` should not be
+read as evidence that combined-network import has been implemented.
+
+Retained source bytes belong to a parsed module. Writing that module back to
+its original format can reproduce the original bytes; writing a network
+recovered from PowerIO IR exercises the writer and reports data the target
+format cannot represent. Tests cover both operations.
+
+PowerIO IR stays at version 2. The schema at
+`pio-ir/2/0.11.8/schema.json` adds the new source-format names, while the
+published 0.11.7 schema stays unchanged. Existing public enum positions and
+serialized format information remain compatible. The existing C ABI 7 is
+sufficient; this PR adds no generated C entry points or Julia runtime API.
 
 ## Verified findings and regression coverage
 
